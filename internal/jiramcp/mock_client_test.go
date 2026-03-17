@@ -6,13 +6,14 @@ import (
 	"fmt"
 
 	jira "github.com/andygrunwald/go-jira"
+	"github.com/mmatczuk/jiramcp/internal/jirahttp"
 )
 
 // mockClient implements JiraClient for testing. Set only the Fn fields your
 // test needs; unset methods panic with a clear message.
 type mockClient struct {
 	GetIssueFn           func(ctx context.Context, key string, opts *jira.GetQueryOptions) (*jira.Issue, error)
-	SearchIssuesFn       func(ctx context.Context, jql string, opts *jira.SearchOptions) ([]jira.Issue, int, error)
+	SearchIssuesFn       func(ctx context.Context, jql string, opts *jirahttp.SearchOptions) (*jirahttp.SearchResult, error)
 	CreateIssueV3Fn      func(ctx context.Context, payload map[string]any) (string, string, error)
 	UpdateIssueV3Fn      func(ctx context.Context, key string, payload map[string]any) error
 	DeleteIssueFn        func(ctx context.Context, key string) error
@@ -36,7 +37,7 @@ func (m *mockClient) GetIssue(ctx context.Context, key string, opts *jira.GetQue
 	return m.GetIssueFn(ctx, key, opts)
 }
 
-func (m *mockClient) SearchIssues(ctx context.Context, jql string, opts *jira.SearchOptions) ([]jira.Issue, int, error) {
+func (m *mockClient) SearchIssues(ctx context.Context, jql string, opts *jirahttp.SearchOptions) (*jirahttp.SearchResult, error) {
 	if m.SearchIssuesFn == nil {
 		panic(fmt.Sprintf("mockClient.SearchIssues called but SearchIssuesFn not set (jql=%s)", jql))
 	}

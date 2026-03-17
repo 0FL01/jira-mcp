@@ -7,6 +7,7 @@ import (
 	"time"
 
 	jira "github.com/andygrunwald/go-jira"
+	"github.com/mmatczuk/jiramcp/internal/jirahttp"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -127,13 +128,16 @@ func TestReadByKeys_AllError(t *testing.T) {
 
 func TestReadByJQL_Success(t *testing.T) {
 	mc := &mockClient{
-		SearchIssuesFn: func(_ context.Context, jql string, opts *jira.SearchOptions) ([]jira.Issue, int, error) {
+		SearchIssuesFn: func(_ context.Context, jql string, opts *jirahttp.SearchOptions) (*jirahttp.SearchResult, error) {
 			assert.Equal(t, "project = PROJ", jql)
 			assert.Equal(t, 100, opts.MaxResults) // default
-			return []jira.Issue{
-				{Key: "PROJ-1", Fields: &jira.IssueFields{Summary: "One"}},
-				{Key: "PROJ-2", Fields: &jira.IssueFields{Summary: "Two"}},
-			}, 2, nil
+			return &jirahttp.SearchResult{
+				Issues: []jira.Issue{
+					{Key: "PROJ-1", Fields: &jira.IssueFields{Summary: "One"}},
+					{Key: "PROJ-2", Fields: &jira.IssueFields{Summary: "Two"}},
+				},
+				Total: 2,
+			}, nil
 		},
 	}
 	h := &handlers{client: mc}
@@ -145,24 +149,28 @@ func TestReadByJQL_Success(t *testing.T) {
 
 func TestReadByJQL_Pagination(t *testing.T) {
 	mc := &mockClient{
-		SearchIssuesFn: func(_ context.Context, _ string, opts *jira.SearchOptions) ([]jira.Issue, int, error) {
+		SearchIssuesFn: func(_ context.Context, _ string, opts *jirahttp.SearchOptions) (*jirahttp.SearchResult, error) {
 			assert.Equal(t, 10, opts.MaxResults)
-			assert.Equal(t, 0, opts.StartAt)
-			return []jira.Issue{
-				{Key: "P-1", Fields: &jira.IssueFields{Summary: "x"}},
-			}, 50, nil
+			return &jirahttp.SearchResult{
+				Issues: []jira.Issue{
+					{Key: "P-1", Fields: &jira.IssueFields{Summary: "x"}},
+				},
+				Total:         50,
+				NextPageToken: "abc123",
+			}, nil
 		},
 	}
 	h := &handlers{client: mc}
 	text, _ := callRead(t, h, ReadArgs{JQL: "project = P", Limit: 10})
-	assert.Contains(t, text, "start_at=10") // pagination hint
+	assert.Contains(t, text, "next_page_token=")
+	assert.Contains(t, text, "abc123")
 }
 
 func TestReadByJQL_WithFields(t *testing.T) {
 	mc := &mockClient{
-		SearchIssuesFn: func(_ context.Context, _ string, opts *jira.SearchOptions) ([]jira.Issue, int, error) {
+		SearchIssuesFn: func(_ context.Context, _ string, opts *jirahttp.SearchOptions) (*jirahttp.SearchResult, error) {
 			assert.Equal(t, []string{"summary", "status"}, opts.Fields)
-			return nil, 0, nil
+			return &jirahttp.SearchResult{}, nil
 		},
 	}
 	h := &handlers{client: mc}
@@ -171,8 +179,8 @@ func TestReadByJQL_WithFields(t *testing.T) {
 
 func TestReadByJQL_ClientError(t *testing.T) {
 	mc := &mockClient{
-		SearchIssuesFn: func(context.Context, string, *jira.SearchOptions) ([]jira.Issue, int, error) {
-			return nil, 0, fmt.Errorf("invalid JQL")
+		SearchIssuesFn: func(context.Context, string, *jirahttp.SearchOptions) (*jirahttp.SearchResult, error) {
+			return nil, fmt.Errorf("invalid JQL")
 		},
 	}
 	h := &handlers{client: mc}
@@ -395,9 +403,9 @@ func TestIssueToMap_MinimalFields(t *testing.T) {
 
 func TestHandleRead_DefaultLimit(t *testing.T) {
 	mc := &mockClient{
-		SearchIssuesFn: func(_ context.Context, _ string, opts *jira.SearchOptions) ([]jira.Issue, int, error) {
+		SearchIssuesFn: func(_ context.Context, _ string, opts *jirahttp.SearchOptions) (*jirahttp.SearchResult, error) {
 			assert.Equal(t, 100, opts.MaxResults)
-			return nil, 0, nil
+			return &jirahttp.SearchResult{}, nil
 		},
 	}
 	h := &handlers{client: mc}

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	jira "github.com/andygrunwald/go-jira"
+	"github.com/mmatczuk/jiramcp/internal/jirahttp"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -25,10 +26,11 @@ type ReadArgs struct {
 	BoardType   string `json:"board_type,omitempty" jsonschema:"Filter boards by type: scrum, kanban."`
 	SprintState string `json:"sprint_state,omitempty" jsonschema:"Filter sprints by state: active, closed, future."`
 
-	Fields  string `json:"fields,omitempty" jsonschema:"Comma-separated field names to return (default: all)."`
-	Expand  string `json:"expand,omitempty" jsonschema:"Comma-separated expansions (e.g. renderedFields transitions changelog)."`
-	Limit   int    `json:"limit,omitempty" jsonschema:"Max results to return. Default 100."`
-	StartAt int    `json:"start_at,omitempty" jsonschema:"Pagination offset. Default 0."`
+	Fields        string `json:"fields,omitempty" jsonschema:"Comma-separated field names to return (default: all)."`
+	Expand        string `json:"expand,omitempty" jsonschema:"Comma-separated expansions (e.g. renderedFields transitions changelog)."`
+	Limit         int    `json:"limit,omitempty" jsonschema:"Max results to return. Default 100."`
+	StartAt       int    `json:"start_at,omitempty" jsonschema:"Pagination offset for resource listings (boards, sprints). Not used for JQL search."`
+	NextPageToken string `json:"next_page_token,omitempty" jsonschema:"Token for fetching the next page of JQL search results. Returned in previous search response."`
 }
 
 var readTool = &mcp.Tool{
@@ -101,9 +103,9 @@ func (h *handlers) readByKeys(ctx context.Context, args ReadArgs) *mcp.CallToolR
 }
 
 func (h *handlers) readByJQL(ctx context.Context, args ReadArgs) *mcp.CallToolResult {
-	opts := &jira.SearchOptions{
-		MaxResults: args.Limit,
-		StartAt:    args.StartAt,
+	opts := &jirahttp.SearchOptions{
+		MaxResults:    args.Limit,
+		NextPageToken: args.NextPageToken,
 	}
 	if args.Fields != "" {
 		for _, f := range strings.Split(args.Fields, ",") {
@@ -114,19 +116,19 @@ func (h *handlers) readByJQL(ctx context.Context, args ReadArgs) *mcp.CallToolRe
 		opts.Expand = args.Expand
 	}
 
-	issues, total, err := h.client.SearchIssues(ctx, args.JQL, opts)
+	sr, err := h.client.SearchIssues(ctx, args.JQL, opts)
 	if err != nil {
 		return textResult(fmt.Sprintf("JQL search failed: %v\nHint: Check your JQL syntax. Use jira_schema resource=fields to see available field names.", err), true)
 	}
 
 	var results []map[string]any
-	for i := range issues {
-		results = append(results, issueToMap(&issues[i]))
+	for i := range sr.Issues {
+		results = append(results, issueToMap(&sr.Issues[i]))
 	}
 
-	summary := fmt.Sprintf("Found %d issue(s) (showing %d, total %d). JQL: %s", len(results), len(results), total, args.JQL)
-	if total > args.StartAt+args.Limit {
-		summary += fmt.Sprintf("\nHint: More results available. Use start_at=%d to get the next page.", args.StartAt+args.Limit)
+	summary := fmt.Sprintf("Found %d issue(s) (total %d). JQL: %s", len(results), sr.Total, args.JQL)
+	if sr.NextPageToken != "" {
+		summary += fmt.Sprintf("\nHint: More results available. Use next_page_token=%q to get the next page.", sr.NextPageToken)
 	}
 
 	return formatReadResult(summary, results, nil)

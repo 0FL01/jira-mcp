@@ -51,13 +51,6 @@ func New(cfg Config) (*Client, error) {
 	return &Client{J: j, cfg: cfg}, nil
 }
 
-// closeResp safely closes a JIRA response body.
-func closeResp(resp *jira.Response) {
-	if resp != nil && resp.Body != nil {
-		_ = resp.Body.Close()
-	}
-}
-
 // GetIssue fetches an issue by key.
 func (c *Client) GetIssue(ctx context.Context, key string, opts *jira.GetQueryOptions) (*jira.Issue, error) {
 	var issue *jira.Issue
@@ -70,16 +63,33 @@ func (c *Client) GetIssue(ctx context.Context, key string, opts *jira.GetQueryOp
 	return issue, err
 }
 
+// SearchOptions configures a JQL search via the v3 search/jql endpoint.
+type SearchOptions struct {
+	MaxResults    int
+	NextPageToken string
+	Fields        []string
+	Expand        string
+}
+
+// SearchResult holds the response from a JQL search.
+type SearchResult struct {
+	Issues        []jira.Issue
+	Total         int
+	NextPageToken string
+}
+
 // SearchIssues runs a JQL query using the v3 search/jql endpoint.
-// Returns issues, total count, and error.
-func (c *Client) SearchIssues(ctx context.Context, jql string, opts *jira.SearchOptions) ([]jira.Issue, int, error) {
-	var issues []jira.Issue
-	var total int
+func (c *Client) SearchIssues(ctx context.Context, jql string, opts *SearchOptions) (*SearchResult, error) {
+	var sr SearchResult
 	err := c.retry(ctx, func() (*jira.Response, error) {
 		body := map[string]any{"jql": jql}
 		if opts != nil {
-			body["maxResults"] = opts.MaxResults
-			body["startAt"] = opts.StartAt
+			if opts.MaxResults > 0 {
+				body["maxResults"] = opts.MaxResults
+			}
+			if opts.NextPageToken != "" {
+				body["nextPageToken"] = opts.NextPageToken
+			}
 			if len(opts.Fields) > 0 {
 				body["fields"] = opts.Fields
 			}
@@ -94,16 +104,19 @@ func (c *Client) SearchIssues(ctx context.Context, jql string, opts *jira.Search
 		}
 
 		var result struct {
-			Issues []jira.Issue `json:"issues"`
-			Total  int         `json:"total"`
+			Issues        []jira.Issue `json:"issues"`
+			Total         int          `json:"total"`
+			NextPageToken string       `json:"nextPageToken"`
 		}
 		resp, err := c.J.Do(req, &result)
-		defer closeResp(resp)
-		issues = result.Issues
-		total = result.Total
+		sr = SearchResult{
+			Issues:        result.Issues,
+			Total:         result.Total,
+			NextPageToken: result.NextPageToken,
+		}
 		return resp, err
 	})
-	return issues, total, err
+	return &sr, err
 }
 
 // CreateIssue creates a new issue.
@@ -169,7 +182,6 @@ func (c *Client) AddComment(ctx context.Context, key string, body any) (string, 
 			ID string `json:"id"`
 		}
 		resp, err := c.J.Do(req, &result)
-		defer closeResp(resp)
 		commentID = result.ID
 		return resp, err
 	})
@@ -196,7 +208,6 @@ func (c *Client) GetAllBoards(ctx context.Context, opts *jira.BoardListOptions) 
 	var isLast bool
 	err := c.retry(ctx, func() (*jira.Response, error) {
 		result, resp, err := c.J.Board.GetAllBoardsWithContext(ctx, opts)
-		defer closeResp(resp)
 		if result != nil {
 			boards = result.Values
 			isLast = result.IsLast
@@ -212,7 +223,6 @@ func (c *Client) GetAllSprints(ctx context.Context, boardID int, opts *jira.GetA
 	var isLast bool
 	err := c.retry(ctx, func() (*jira.Response, error) {
 		result, resp, err := c.J.Board.GetAllSprintsWithOptionsWithContext(ctx, boardID, opts)
-		defer closeResp(resp)
 		if result != nil {
 			sprints = result.Values
 			isLast = result.IsLast
@@ -292,7 +302,6 @@ func (c *Client) CreateIssueV3(ctx context.Context, payload map[string]any) (str
 			Key string `json:"key"`
 		}
 		resp, err := c.J.Do(req, &result)
-		defer closeResp(resp)
 		key = result.Key
 		id = result.ID
 		return resp, err
@@ -328,7 +337,6 @@ func (c *Client) GetFieldOptions(ctx context.Context, fieldID string) ([]json.Ra
 			} `json:"values"`
 		}
 		resp, err := c.J.Do(req, &ctxResult)
-		defer closeResp(resp)
 		if err != nil {
 			return resp, err
 		}
@@ -399,6 +407,13 @@ func enrichError(resp *jira.Response, original error) error {
 	}
 
 	return fmt.Errorf("%w: %s", original, strings.Join(parts, "; "))
+}
+
+// closeResp safely closes a JIRA response body.
+func closeResp(resp *jira.Response) {
+	if resp != nil && resp.Body != nil {
+		_ = resp.Body.Close()
+	}
 }
 
 func (c *Client) retry(ctx context.Context, fn func() (*jira.Response, error)) error {

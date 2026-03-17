@@ -5,12 +5,13 @@ import (
 	"encoding/json"
 
 	jira "github.com/andygrunwald/go-jira"
+	"github.com/mmatczuk/jiramcp/internal/jirahttp"
 )
 
 // JiraClient defines the Jira operations used by the MCP handlers.
 type JiraClient interface {
 	GetIssue(ctx context.Context, key string, opts *jira.GetQueryOptions) (*jira.Issue, error)
-	SearchIssues(ctx context.Context, jql string, opts *jira.SearchOptions) ([]jira.Issue, int, error)
+	SearchIssues(ctx context.Context, jql string, opts *jirahttp.SearchOptions) (*jirahttp.SearchResult, error)
 	CreateIssueV3(ctx context.Context, payload map[string]any) (string, string, error)
 	UpdateIssueV3(ctx context.Context, key string, payload map[string]any) error
 	DeleteIssue(ctx context.Context, key string) error
