@@ -341,7 +341,7 @@ func formatReadResult(summary string, results []map[string]any, errors []string)
 	}
 
 	if len(results) > 0 {
-		data, err := json.MarshalIndent(results, "", "  ")
+		data, err := json.Marshal(results)
 		if err != nil {
 			out += fmt.Sprintf("Failed to serialize results: %v", err)
 		} else {

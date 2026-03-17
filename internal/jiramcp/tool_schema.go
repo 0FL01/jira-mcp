@@ -61,7 +61,7 @@ func (h *handlers) schemaFields(ctx context.Context) *mcp.CallToolResult {
 		results = append(results, entry)
 	}
 
-	data, _ := json.MarshalIndent(results, "", "  ")
+	data, _ := json.Marshal(results)
 	out := fmt.Sprintf("Found %d field(s). Use field IDs in jira_write fields_json for custom fields.\n\n%s", len(results), string(data))
 
 	return textResult(out, false)
@@ -89,7 +89,7 @@ func (h *handlers) schemaTransitions(ctx context.Context, args SchemaArgs) *mcp.
 		results = append(results, entry)
 	}
 
-	data, _ := json.MarshalIndent(results, "", "  ")
+	data, _ := json.Marshal(results)
 	out := fmt.Sprintf("Found %d transition(s) for %s. Use the transition ID with jira_write action=transition transition_id=<id>.\n\n%s", len(results), args.IssueKey, string(data))
 
 	return textResult(out, false)
@@ -109,7 +109,7 @@ func (h *handlers) schemaFieldOptions(ctx context.Context, args SchemaArgs) *mcp
 		return textResult(fmt.Sprintf("No options found for field %s. The field may not have a context, or may not be a select/multiselect type.", args.FieldID), false)
 	}
 
-	data, _ := json.MarshalIndent(values, "", "  ")
+	data, _ := json.Marshal(values)
 	out := fmt.Sprintf("Found %d option(s) for field %s.\n\n%s", len(values), args.FieldID, string(data))
 
 	return textResult(out, false)
