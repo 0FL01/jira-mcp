@@ -20,7 +20,7 @@ internal/mdconv/  - Markdown to ADF converter (legacy, not used)
 - `internal/jira/client.go` - all Jira API calls with exponential backoff on 429
 - `internal/jiramcp/server.go` - tool registration, instructions text
 - `internal/jiramcp/tool_read.go` - jira_read handler (keys/JQL/resource modes)
-- `internal/jiramcp/tool_write.go` - jira_write handler (create/update/delete/transition/comment)
+- `internal/jiramcp/tool_write.go` - jira_write handler (create/update/delete/transition/comment/worklog)
 - `internal/jiramcp/tool_schema.go` - jira_schema handler (fields/transitions only)
 - `internal/mdconv/mdconv.go` - Markdown to ADF converter (legacy, unused)
 
@@ -42,7 +42,7 @@ internal/mdconv/  - Markdown to ADF converter (legacy, not used)
 ### Jira Client (internal/jira/client.go)
 - Wraps go-jira with call-level retry (429 with Retry-After header, 502, 503)
 - Exponential backoff starting at 1s, max 3 retries
-- Methods: GetIssue, SearchIssues, DeleteIssue, GetTransitions, DoTransition, AddComment, UpdateComment, GetAllBoards, GetAllSprints, GetSprintIssues, MoveIssuesToSprint, GetAllProjects, GetFields, CreateIssueV2, UpdateIssueV2
+- Methods: GetIssue, SearchIssues, DeleteIssue, GetTransitions, DoTransition, AddComment, UpdateComment, GetAllBoards, GetAllSprints, GetSprintIssues, MoveIssuesToSprint, GetAllProjects, GetFields, CreateIssueV2, UpdateIssueV2, GetWorklogs, AddWorklog, UpdateWorklog, DeleteWorklog
 
 ### MCP Server (internal/jiramcp/server.go)
 - 3 tools registered: readTool, writeTool, schemaTool
@@ -55,11 +55,19 @@ internal/mdconv/  - Markdown to ADF converter (legacy, not used)
 - Fields, expand, limit, pagination via start_at (offset-based)
 
 ### jira_write Tool
-- Actions: create, update, delete, transition, comment, edit_comment, move_to_sprint
+- Actions: create, update, delete, transition, comment, edit_comment, move_to_sprint, add_worklog, update_worklog, delete_worklog
 - move_to_sprint batches by sprint_id
 - buildIssuePayload() merges WriteItem fields + fields_json escape hatch
 - Descriptions and comments: plain text or wiki markup (ADF NOT supported)
 - Assignee: username (name), not accountId
+
+### Worklog (Time Tracking)
+- IMPORTANT: timetracking/timeSpent fields are READ-ONLY in Jira Server 7.x
+- Use `add_worklog` action instead to log time
+- API endpoint: POST /rest/api/2/issue/{key}/worklog
+- add_worklog requires: key, time_spent (e.g., "3h 30m") OR time_spent_seconds
+- Optional: comment, started (ISO 8601), adjust_estimate, visibility
+- estimate adjustment modes: auto (default), new, leave, manual
 
 ### jira_schema Tool
 - resources: fields (all fields), transitions (needs issue_key)
