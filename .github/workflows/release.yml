@@ -4,12 +4,48 @@ on:
   push:
     tags:
       - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version (e.g., v0.2.0)'
+        required: true
+        type: string
+      release_type:
+        description: 'Release type'
+        required: true
+        default: 'release'
+        type: choice
+        options:
+          - release
+          - snapshot
 
 permissions:
   contents: write  # create GitHub releases and push Homebrew cask commit
   packages: write
 
 jobs:
+  build:
+    name: Build Binary
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch'
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - name: Build
+        run: |
+          go build -o bin/jira-mcp ./cmd/jira-mcp
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: jira-mcp-binary
+          path: bin/jira-mcp
+          retention-days: 7
+
   release:
     name: GoReleaser
     runs-on: ubuntu-latest
@@ -31,10 +67,25 @@ jobs:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
 
+      - name: Create tag for manual run
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          git tag ${{ inputs.version }}
+          git push origin ${{ inputs.version }}
+
+      - name: Determine args
+        id: args
+        run: |
+          if [ "${{ inputs.release_type }}" == "snapshot" ]; then
+            echo "ARGS=release --clean --snapshot" >> $GITHUB_OUTPUT
+          else
+            echo "ARGS=release --clean" >> $GITHUB_OUTPUT
+          fi
+
       - uses: goreleaser/goreleaser-action@v6
         with:
           distribution: goreleaser
           version: "~> v2"
-          args: release --clean
+          args: ${{ steps.args.outputs.ARGS }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
