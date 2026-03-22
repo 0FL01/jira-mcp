@@ -18,10 +18,13 @@ var schemaTool = &mcp.Tool{
 	Name: "jira_schema",
 	Description: `Discover JIRA metadata needed to construct valid jira_write payloads.
 
+NOTE: This version is designed for Jira Server/Data Center 7.x (REST API v2).
+- field_options is NOT supported (no equivalent endpoint in REST API v2).
+
 Resources:
 - fields: List all available fields (standard and custom). Returns field ID, name, and type.
 - transitions: List available transitions for an issue. Requires issue_key. Returns transition ID and name — use these IDs with jira_write action=transition.
-- field_options: List allowed values for a custom field. Requires field_id (e.g. customfield_10001). Fetches the field's context, then its options.
+- field_options: (NOT SUPPORTED on Jira Server 7.x) The field options API only exists in Jira Cloud REST API v3.
 
 Hint: Always check transitions before transitioning an issue. Field IDs from "fields" can be used in jira_write fields_json.`,
 }
@@ -33,9 +36,10 @@ func (h *handlers) handleSchema(ctx context.Context, _ *mcp.CallToolRequest, arg
 	case "transitions":
 		return h.schemaTransitions(ctx, args), nil, nil
 	case "field_options":
-		return h.schemaFieldOptions(ctx, args), nil, nil
+		// NOT SUPPORTED: Jira Server 7.x REST API v2 does not have field options endpoint
+		return textResult("field_options is NOT supported on Jira Server 7.x.\n\nReason: The field options API (/rest/api/3/field/{id}/context) only exists in Jira Cloud REST API v3.\n\nAlternatives:\n1. Use GET /rest/api/2/issue/createmeta to discover field metadata\n2. Use GET /rest/api/2/issue/{issueKey}/editmeta to see allowed values\n3. Check the Jira UI for field option IDs", false), nil, nil
 	default:
-		return textResult(fmt.Sprintf("Unknown resource %q. Valid: fields, transitions, field_options.", args.Resource), true), nil, nil
+		return textResult(fmt.Sprintf("Unknown resource %q. Valid: fields, transitions, field_options (NOT SUPPORTED on Jira Server 7.x).", args.Resource), true), nil, nil
 	}
 }
 

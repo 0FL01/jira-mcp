@@ -178,7 +178,7 @@ func TestRetry_SucceedsOn429ThenOK(t *testing.T) {
 	defer srv.Close()
 
 	c := newTestClient(t, srv.URL)
-	key, _, err := c.CreateIssueV3(context.Background(), map[string]any{
+	key, _, err := c.CreateIssueV2(context.Background(), map[string]any{
 		"fields": map[string]any{"summary": "test"},
 	})
 	require.NoError(t, err)
@@ -196,7 +196,7 @@ func TestRetry_ExhaustsMaxRetries(t *testing.T) {
 
 	c := newTestClient(t, srv.URL)
 	c.cfg.MaxRetries = 2
-	_, _, err := c.CreateIssueV3(context.Background(), map[string]any{})
+	_, _, err := c.CreateIssueV2(context.Background(), map[string]any{})
 	require.Error(t, err)
 	assert.Equal(t, 3, calls) // initial + 2 retries
 }
@@ -214,7 +214,7 @@ func TestRetry_ContextCancellation(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
 
-	_, _, err := c.CreateIssueV3(ctx, map[string]any{})
+	_, _, err := c.CreateIssueV2(ctx, map[string]any{})
 	require.Error(t, err)
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
 }
@@ -228,7 +228,7 @@ func TestRetry_DoesNotRetry500(t *testing.T) {
 	defer srv.Close()
 
 	c := newTestClient(t, srv.URL)
-	_, _, err := c.CreateIssueV3(context.Background(), map[string]any{})
+	_, _, err := c.CreateIssueV2(context.Background(), map[string]any{})
 	require.Error(t, err)
 	assert.Equal(t, 1, calls) // no retry
 }
@@ -247,53 +247,21 @@ func TestRetry_RetriesOn503(t *testing.T) {
 	defer srv.Close()
 
 	c := newTestClient(t, srv.URL)
-	key, _, err := c.CreateIssueV3(context.Background(), map[string]any{})
+	key, _, err := c.CreateIssueV2(context.Background(), map[string]any{})
 	require.NoError(t, err)
 	assert.Equal(t, "P-1", key)
 	assert.Equal(t, 2, calls)
 }
 
-// --- GetFieldOptions multi-context ---
+// --- GetFieldOptions (NOT SUPPORTED on Jira Server 7.x) ---
 
-func TestGetFieldOptions_MultipleContexts(t *testing.T) {
-	calls := 0
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		calls++
-		w.Header().Set("Content-Type", "application/json")
-		switch r.URL.Path {
-		case "/rest/api/3/field/cf_1/context":
-			_ = json.NewEncoder(w).Encode(map[string]any{
-				"values": []map[string]any{{"id": "ctx1"}, {"id": "ctx2"}},
-			})
-		case "/rest/api/3/field/cf_1/context/ctx1/option":
-			_ = json.NewEncoder(w).Encode(map[string]any{
-				"values": []map[string]any{{"id": "opt1", "value": "A"}, {"id": "opt2", "value": "B"}},
-			})
-		case "/rest/api/3/field/cf_1/context/ctx2/option":
-			_ = json.NewEncoder(w).Encode(map[string]any{
-				// opt2 appears in both contexts — should be deduplicated.
-				"values": []map[string]any{{"id": "opt2", "value": "B"}, {"id": "opt3", "value": "C"}},
-			})
-		}
-	}))
-	defer srv.Close()
-
-	c := newTestClient(t, srv.URL)
-	opts, err := c.GetFieldOptions(context.Background(), "cf_1")
-	require.NoError(t, err)
-	assert.Len(t, opts, 3) // opt1, opt2 (deduped), opt3
-	assert.Equal(t, 3, calls)
-}
-
-func TestGetFieldOptions_NoContexts(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]any{"values": []any{}})
-	}))
-	defer srv.Close()
-
-	c := newTestClient(t, srv.URL)
-	opts, err := c.GetFieldOptions(context.Background(), "cf_1")
-	require.NoError(t, err)
-	assert.Empty(t, opts)
+// TestGetFieldOptions_Unsupported verifies that GetFieldOptions returns an error
+// on Jira Server 7.x since the field options API (/rest/api/3/field/{id}/context)
+// only exists in Jira Cloud REST API v3.
+func TestGetFieldOptions_Unsupported(t *testing.T) {
+	c := &Client{cfg: Config{}}
+	_, err := c.GetFieldOptions(context.Background(), "cf_1")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not supported")
+	assert.Contains(t, err.Error(), "Jira Server 7.x")
 }

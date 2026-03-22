@@ -25,11 +25,10 @@ type ReadArgs struct {
 	BoardType   string `json:"board_type,omitempty" jsonschema:"Filter boards by type: scrum, kanban."`
 	SprintState string `json:"sprint_state,omitempty" jsonschema:"Filter sprints by state: active, closed, future."`
 
-	Fields        string `json:"fields,omitempty" jsonschema:"Comma-separated field names to return (default: all)."`
-	Expand        string `json:"expand,omitempty" jsonschema:"Comma-separated expansions (e.g. renderedFields transitions changelog)."`
-	Limit         int    `json:"limit,omitempty" jsonschema:"Max results to return. Default 100."`
-	StartAt       int    `json:"start_at,omitempty" jsonschema:"Pagination offset for resource listings (boards, sprints). Not used for JQL search."`
-	NextPageToken string `json:"next_page_token,omitempty" jsonschema:"Token for fetching the next page of JQL search results. Returned in previous search response."`
+	Fields  string `json:"fields,omitempty" jsonschema:"Comma-separated field names to return (default: all)."`
+	Expand  string `json:"expand,omitempty" jsonschema:"Comma-separated expansions (e.g. renderedFields transitions changelog)."`
+	Limit   int    `json:"limit,omitempty" jsonschema:"Max results to return. Default 100."`
+	StartAt int    `json:"start_at,omitempty" jsonschema:"Pagination offset for JQL search and resource listings. Jira Server 7.x uses offset-based pagination (not cursor-based)."`
 }
 
 var readTool = &mcp.Tool{
@@ -102,7 +101,7 @@ func (h *handlers) readByKeys(ctx context.Context, args ReadArgs) *mcp.CallToolR
 	}
 	jql := fmt.Sprintf("issueKey in (%s)", strings.Join(quoted, ", "))
 
-	opts := &jira.SearchOptionsV3{MaxResults: len(args.Keys)}
+	opts := &jira.SearchOptionsV2{MaxResults: len(args.Keys)}
 	if args.Fields != "" {
 		for _, f := range strings.Split(args.Fields, ",") {
 			opts.Fields = append(opts.Fields, strings.TrimSpace(f))
@@ -125,9 +124,9 @@ func (h *handlers) readByKeys(ctx context.Context, args ReadArgs) *mcp.CallToolR
 }
 
 func (h *handlers) readByJQL(ctx context.Context, args ReadArgs) *mcp.CallToolResult {
-	opts := &jira.SearchOptionsV3{
-		MaxResults:    args.Limit,
-		NextPageToken: args.NextPageToken,
+	opts := &jira.SearchOptionsV2{
+		MaxResults: args.Limit,
+		StartAt:    args.StartAt,
 	}
 	if args.Fields != "" {
 		for _, f := range strings.Split(args.Fields, ",") {
@@ -148,9 +147,13 @@ func (h *handlers) readByJQL(ctx context.Context, args ReadArgs) *mcp.CallToolRe
 		results = append(results, issueToMap(&sr.Issues[i]))
 	}
 
-	summary := fmt.Sprintf("Found %d issue(s) (total %d). JQL: %s", len(results), sr.Total, args.JQL)
-	if sr.NextPageToken != "" {
-		summary += fmt.Sprintf("\nHint: More results available. Use next_page_token=%q to get the next page.", sr.NextPageToken)
+	// Calculate next offset for pagination
+	nextStartAt := sr.StartAt + sr.MaxResults
+	summary := fmt.Sprintf("Found %d issue(s) (total %d). Showing %d-%d. JQL: %s",
+		len(results), sr.Total, sr.StartAt, nextStartAt, args.JQL)
+
+	if !sr.IsLast && nextStartAt < sr.Total {
+		summary += fmt.Sprintf("\nHint: More results available. Use start_at=%d to get the next page.", nextStartAt)
 	}
 
 	return formatReadResult(summary, results, nil)

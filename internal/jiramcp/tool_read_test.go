@@ -77,11 +77,11 @@ func TestReadByKeys_PassesFieldsAndExpand(t *testing.T) {
 
 func TestReadByKeys_MultipleKeys(t *testing.T) {
 	mc := &mockClient{
-		SearchIssuesFn: func(_ context.Context, jql string, opts *jira.SearchOptionsV3) (*jira.SearchResultV3, error) {
+		SearchIssuesFn: func(_ context.Context, jql string, opts *jira.SearchOptionsV2) (*jira.SearchResultV2, error) {
 			assert.Contains(t, jql, "issueKey in")
 			assert.Contains(t, jql, "A-1")
 			assert.Contains(t, jql, "B-2")
-			return &jira.SearchResultV3{
+			return &jira.SearchResultV2{
 				Issues: []jira.Issue{
 					{Key: "A-1", Fields: &jira.IssueFields{Summary: "Issue A-1"}},
 					{Key: "B-2", Fields: &jira.IssueFields{Summary: "Issue B-2"}},
@@ -99,9 +99,9 @@ func TestReadByKeys_MultipleKeys(t *testing.T) {
 func TestReadByKeys_PartialError(t *testing.T) {
 	// With 2 keys, the JQL path is used; JIRA simply omits unknown keys.
 	mc := &mockClient{
-		SearchIssuesFn: func(_ context.Context, _ string, _ *jira.SearchOptionsV3) (*jira.SearchResultV3, error) {
+		SearchIssuesFn: func(_ context.Context, _ string, _ *jira.SearchOptionsV2) (*jira.SearchResultV2, error) {
 			// JIRA returns only the issues that exist; BAD-1 is silently absent.
-			return &jira.SearchResultV3{
+			return &jira.SearchResultV2{
 				Issues: []jira.Issue{
 					{Key: "GOOD-1", Fields: &jira.IssueFields{Summary: "ok"}},
 				},
@@ -133,10 +133,10 @@ func TestReadByKeys_AllError(t *testing.T) {
 
 func TestReadByJQL_Success(t *testing.T) {
 	mc := &mockClient{
-		SearchIssuesFn: func(_ context.Context, jql string, opts *jira.SearchOptionsV3) (*jira.SearchResultV3, error) {
+		SearchIssuesFn: func(_ context.Context, jql string, opts *jira.SearchOptionsV2) (*jira.SearchResultV2, error) {
 			assert.Equal(t, "project = PROJ", jql)
 			assert.Equal(t, 100, opts.MaxResults) // default
-			return &jira.SearchResultV3{
+			return &jira.SearchResultV2{
 				Issues: []jira.Issue{
 					{Key: "PROJ-1", Fields: &jira.IssueFields{Summary: "One"}},
 					{Key: "PROJ-2", Fields: &jira.IssueFields{Summary: "Two"}},
@@ -154,48 +154,49 @@ func TestReadByJQL_Success(t *testing.T) {
 
 func TestReadByJQL_Pagination(t *testing.T) {
 	mc := &mockClient{
-		SearchIssuesFn: func(_ context.Context, _ string, opts *jira.SearchOptionsV3) (*jira.SearchResultV3, error) {
+		SearchIssuesFn: func(_ context.Context, _ string, opts *jira.SearchOptionsV2) (*jira.SearchResultV2, error) {
 			assert.Equal(t, 10, opts.MaxResults)
-			return &jira.SearchResultV3{
+			return &jira.SearchResultV2{
 				Issues: []jira.Issue{
 					{Key: "P-1", Fields: &jira.IssueFields{Summary: "x"}},
 				},
-				Total:         50,
-				NextPageToken: "abc123",
+				Total:      50,
+				StartAt:    0,
+				MaxResults: 10,
+				IsLast:     false,
 			}, nil
 		},
 	}
 	h := &handlers{client: mc}
 	text, _ := callRead(t, h, ReadArgs{JQL: "project = P", Limit: 10})
-	assert.Contains(t, text, "next_page_token=")
-	assert.Contains(t, text, "abc123")
+	assert.Contains(t, text, "start_at=10")
 }
 
 func TestReadByJQL_WithFields(t *testing.T) {
 	mc := &mockClient{
-		SearchIssuesFn: func(_ context.Context, _ string, opts *jira.SearchOptionsV3) (*jira.SearchResultV3, error) {
+		SearchIssuesFn: func(_ context.Context, _ string, opts *jira.SearchOptionsV2) (*jira.SearchResultV2, error) {
 			assert.Equal(t, []string{"summary", "status"}, opts.Fields)
-			return &jira.SearchResultV3{}, nil
+			return &jira.SearchResultV2{}, nil
 		},
 	}
 	h := &handlers{client: mc}
 	callRead(t, h, ReadArgs{JQL: "x", Fields: "summary,status"})
 }
 
-func TestReadByJQL_WithNextPageToken(t *testing.T) {
+func TestReadByJQL_WithStartAt(t *testing.T) {
 	mc := &mockClient{
-		SearchIssuesFn: func(_ context.Context, _ string, opts *jira.SearchOptionsV3) (*jira.SearchResultV3, error) {
-			assert.Equal(t, "tok123", opts.NextPageToken)
-			return &jira.SearchResultV3{}, nil
+		SearchIssuesFn: func(_ context.Context, _ string, opts *jira.SearchOptionsV2) (*jira.SearchResultV2, error) {
+			assert.Equal(t, 25, opts.StartAt)
+			return &jira.SearchResultV2{}, nil
 		},
 	}
 	h := &handlers{client: mc}
-	callRead(t, h, ReadArgs{JQL: "project = X", NextPageToken: "tok123"})
+	callRead(t, h, ReadArgs{JQL: "project = X", StartAt: 25})
 }
 
 func TestReadByJQL_ClientError(t *testing.T) {
 	mc := &mockClient{
-		SearchIssuesFn: func(context.Context, string, *jira.SearchOptionsV3) (*jira.SearchResultV3, error) {
+		SearchIssuesFn: func(context.Context, string, *jira.SearchOptionsV2) (*jira.SearchResultV2, error) {
 			return nil, fmt.Errorf("invalid JQL")
 		},
 	}
@@ -419,9 +420,9 @@ func TestIssueToMap_MinimalFields(t *testing.T) {
 
 func TestHandleRead_DefaultLimit(t *testing.T) {
 	mc := &mockClient{
-		SearchIssuesFn: func(_ context.Context, _ string, opts *jira.SearchOptionsV3) (*jira.SearchResultV3, error) {
+		SearchIssuesFn: func(_ context.Context, _ string, opts *jira.SearchOptionsV2) (*jira.SearchResultV2, error) {
 			assert.Equal(t, 100, opts.MaxResults)
-			return &jira.SearchResultV3{}, nil
+			return &jira.SearchResultV2{}, nil
 		},
 	}
 	h := &handlers{client: mc}

@@ -2,7 +2,6 @@ package jiramcp
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"testing"
 
@@ -131,52 +130,25 @@ func TestSchemaTransitions_Error(t *testing.T) {
 	assert.Contains(t, text, "issue not found")
 }
 
-// --- field_options ---
+// --- field_options (NOT SUPPORTED on Jira Server 7.x) ---
 
-func TestSchemaFieldOptions_Success(t *testing.T) {
-	mc := &mockClient{
-		GetFieldOptionsFn: func(_ context.Context, fieldID string) ([]json.RawMessage, error) {
-			assert.Equal(t, "customfield_10001", fieldID)
-			return []json.RawMessage{
-				json.RawMessage(`{"id":"1","value":"Option A"}`),
-				json.RawMessage(`{"id":"2","value":"Option B"}`),
-			}, nil
-		},
-	}
-	h := &handlers{client: mc}
+// TestSchemaFieldOptions_Unsupported verifies that field_options returns
+// a message indicating this feature is not supported on Jira Server 7.x.
+func TestSchemaFieldOptions_Unsupported(t *testing.T) {
+	h := &handlers{client: &mockClient{}}
 	text, isErr := callSchema(t, h, SchemaArgs{Resource: "field_options", FieldID: "customfield_10001"})
+	// field_options is now a warning, not an error
 	assert.False(t, isErr)
-	assert.Contains(t, text, "Found 2 option(s)")
-	assert.Contains(t, text, "Option A")
+	assert.Contains(t, text, "NOT supported on Jira Server 7.x")
+	assert.Contains(t, text, "REST API v3")
 }
 
-func TestSchemaFieldOptions_NoFieldID(t *testing.T) {
+// TestSchemaFieldOptions_NoFieldIDStillUnsupported verifies that even without
+// field_id, the response indicates field_options is unsupported.
+func TestSchemaFieldOptions_NoFieldIDStillUnsupported(t *testing.T) {
 	h := &handlers{client: &mockClient{}}
 	text, isErr := callSchema(t, h, SchemaArgs{Resource: "field_options"})
-	assert.True(t, isErr)
-	assert.Contains(t, text, "field_id is required")
-}
-
-func TestSchemaFieldOptions_Empty(t *testing.T) {
-	mc := &mockClient{
-		GetFieldOptionsFn: func(context.Context, string) ([]json.RawMessage, error) {
-			return nil, nil
-		},
-	}
-	h := &handlers{client: mc}
-	text, isErr := callSchema(t, h, SchemaArgs{Resource: "field_options", FieldID: "cf_999"})
+	// Even without field_id, we show the unsupported message
 	assert.False(t, isErr)
-	assert.Contains(t, text, "No options found")
-}
-
-func TestSchemaFieldOptions_Error(t *testing.T) {
-	mc := &mockClient{
-		GetFieldOptionsFn: func(context.Context, string) ([]json.RawMessage, error) {
-			return nil, fmt.Errorf("permission denied")
-		},
-	}
-	h := &handlers{client: mc}
-	text, isErr := callSchema(t, h, SchemaArgs{Resource: "field_options", FieldID: "cf_1"})
-	assert.True(t, isErr)
-	assert.Contains(t, text, "permission denied")
+	assert.Contains(t, text, "NOT supported on Jira Server 7.x")
 }

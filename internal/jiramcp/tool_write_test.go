@@ -19,9 +19,9 @@ func TestBuildIssuePayload_AllFields(t *testing.T) {
 		Summary:     "Test summary",
 		IssueType:   "Bug",
 		Priority:    "High",
-		Assignee:    "abc123",
+		Assignee:    "jsmith", // NOTE: Jira Server uses username, not accountId
 		Labels:      []string{"backend", "urgent"},
-		Description: "Hello **world**",
+		Description: "Hello world", // NOTE: Jira Server 7.x uses plain text, not ADF
 	}
 
 	payload, err := buildIssuePayload(item)
@@ -32,13 +32,11 @@ func TestBuildIssuePayload_AllFields(t *testing.T) {
 	assert.Equal(t, "Test summary", fields["summary"])
 	assert.Equal(t, map[string]any{"name": "Bug"}, fields["issuetype"])
 	assert.Equal(t, map[string]any{"name": "High"}, fields["priority"])
-	assert.Equal(t, map[string]any{"accountId": "abc123"}, fields["assignee"])
+	// NOTE: Jira Server 7.x uses "name" (username), not "accountId"
+	assert.Equal(t, map[string]any{"name": "jsmith"}, fields["assignee"])
 	assert.Equal(t, []string{"backend", "urgent"}, fields["labels"])
-
-	desc, ok := fields["description"].(map[string]any)
-	require.True(t, ok, "description should be ADF map")
-	assert.Equal(t, 1, desc["version"])
-	assert.Equal(t, "doc", desc["type"])
+	// NOTE: Jira Server 7.x uses plain text, not ADF
+	assert.Equal(t, "Hello world", fields["description"])
 }
 
 func TestBuildIssuePayload_EmptyItem(t *testing.T) {
@@ -87,22 +85,15 @@ func TestBuildIssuePayload_FieldsJSON_OverridesStandard(t *testing.T) {
 
 // --- buildCommentBody ---
 
-func TestBuildCommentBody_Markdown(t *testing.T) {
+func TestBuildCommentBody_ReturnsPlainText(t *testing.T) {
+	// NOTE: Jira Server 7.x uses plain text, not ADF
 	body := buildCommentBody("Hello **world**")
-	m, ok := body.(map[string]any)
-	require.True(t, ok)
-	assert.Equal(t, 1, m["version"])
-	assert.Equal(t, "doc", m["type"])
+	assert.Equal(t, "Hello **world**", body)
 }
 
-func TestBuildCommentBody_EmptyFallback(t *testing.T) {
+func TestBuildCommentBody_EmptyString(t *testing.T) {
 	body := buildCommentBody("")
-	m, ok := body.(map[string]any)
-	require.True(t, ok)
-	assert.Equal(t, "doc", m["type"])
-	content := m["content"].([]any)
-	para := content[0].(map[string]any)
-	assert.Equal(t, "paragraph", para["type"])
+	assert.Equal(t, "", body)
 }
 
 // --- handleWrite dispatch & validation ---
@@ -140,7 +131,7 @@ func TestHandleWrite_UnknownAction(t *testing.T) {
 
 func TestWriteCreate_Success(t *testing.T) {
 	mc := &mockClient{
-		CreateIssueV3Fn: func(_ context.Context, payload map[string]any) (string, string, error) {
+		CreateIssueV2Fn: func(_ context.Context, payload map[string]any) (string, string, error) {
 			fields := payload["fields"].(map[string]any)
 			assert.Equal(t, "Test", fields["summary"])
 			return "PROJ-1", "10001", nil
@@ -202,7 +193,7 @@ func TestWriteCreate_DryRun(t *testing.T) {
 
 func TestWriteCreate_ClientError(t *testing.T) {
 	mc := &mockClient{
-		CreateIssueV3Fn: func(context.Context, map[string]any) (string, string, error) {
+		CreateIssueV2Fn: func(context.Context, map[string]any) (string, string, error) {
 			return "", "", fmt.Errorf("permission denied")
 		},
 	}
@@ -218,7 +209,7 @@ func TestWriteCreate_ClientError(t *testing.T) {
 
 func TestWriteCreate_WithFieldsJSON(t *testing.T) {
 	mc := &mockClient{
-		CreateIssueV3Fn: func(_ context.Context, payload map[string]any) (string, string, error) {
+		CreateIssueV2Fn: func(_ context.Context, payload map[string]any) (string, string, error) {
 			fields := payload["fields"].(map[string]any)
 			assert.Equal(t, "custom_val", fields["customfield_10001"])
 			return "PROJ-2", "10002", nil
@@ -258,7 +249,7 @@ func TestWriteCreate_InvalidFieldsJSON(t *testing.T) {
 
 func TestWriteUpdate_Success(t *testing.T) {
 	mc := &mockClient{
-		UpdateIssueV3Fn: func(_ context.Context, key string, payload map[string]any) error {
+		UpdateIssueV2Fn: func(_ context.Context, key string, payload map[string]any) error {
 			assert.Equal(t, "PROJ-1", key)
 			fields := payload["fields"].(map[string]any)
 			assert.Equal(t, "Updated title", fields["summary"])
@@ -296,7 +287,7 @@ func TestWriteUpdate_DryRun(t *testing.T) {
 
 func TestWriteUpdate_ClientError(t *testing.T) {
 	mc := &mockClient{
-		UpdateIssueV3Fn: func(context.Context, string, map[string]any) error {
+		UpdateIssueV2Fn: func(context.Context, string, map[string]any) error {
 			return fmt.Errorf("not found")
 		},
 	}
@@ -382,7 +373,7 @@ func TestWriteTransition_Success(t *testing.T) {
 func TestWriteTransition_WithComment(t *testing.T) {
 	mc := &mockClient{
 		DoTransitionFn: func(context.Context, string, string) error { return nil },
-		AddCommentFn: func(_ context.Context, key string, body any) (string, error) {
+		AddCommentFn: func(_ context.Context, key string, body string) (string, error) {
 			assert.Equal(t, "PROJ-1", key)
 			return "99", nil
 		},
@@ -399,7 +390,7 @@ func TestWriteTransition_WithComment(t *testing.T) {
 func TestWriteTransition_CommentFails(t *testing.T) {
 	mc := &mockClient{
 		DoTransitionFn: func(context.Context, string, string) error { return nil },
-		AddCommentFn: func(context.Context, string, any) (string, error) {
+		AddCommentFn: func(context.Context, string, string) (string, error) {
 			return "", fmt.Errorf("comment boom")
 		},
 	}
@@ -457,7 +448,7 @@ func TestWriteTransition_DryRunWithComment(t *testing.T) {
 
 func TestWriteComment_Success(t *testing.T) {
 	mc := &mockClient{
-		AddCommentFn: func(_ context.Context, key string, body any) (string, error) {
+		AddCommentFn: func(_ context.Context, key string, body string) (string, error) {
 			assert.Equal(t, "PROJ-1", key)
 			return "200", nil
 		},
@@ -507,7 +498,7 @@ func TestWriteComment_DryRun(t *testing.T) {
 
 func TestWriteEditComment_Success(t *testing.T) {
 	mc := &mockClient{
-		UpdateCommentFn: func(_ context.Context, key, cid string, body any) error {
+		UpdateCommentFn: func(_ context.Context, key, cid string, body string) error {
 			assert.Equal(t, "PROJ-1", key)
 			assert.Equal(t, "55", cid)
 			return nil
@@ -656,7 +647,7 @@ func TestWriteMoveToSprint_DryRun(t *testing.T) {
 func TestHandleWrite_Batch(t *testing.T) {
 	createCalls := 0
 	mc := &mockClient{
-		CreateIssueV3Fn: func(context.Context, map[string]any) (string, string, error) {
+		CreateIssueV2Fn: func(context.Context, map[string]any) (string, string, error) {
 			createCalls++
 			return fmt.Sprintf("PROJ-%d", createCalls), "id", nil
 		},
@@ -681,7 +672,7 @@ func TestHandleWrite_Batch(t *testing.T) {
 func TestHandleWrite_BatchPartialFailure(t *testing.T) {
 	call := 0
 	mc := &mockClient{
-		CreateIssueV3Fn: func(context.Context, map[string]any) (string, string, error) {
+		CreateIssueV2Fn: func(context.Context, map[string]any) (string, string, error) {
 			call++
 			if call == 2 {
 				return "", "", fmt.Errorf("quota exceeded")
@@ -709,7 +700,7 @@ func TestHandleWrite_BatchPartialFailure(t *testing.T) {
 
 func TestWriteComment_ClientError(t *testing.T) {
 	mc := &mockClient{
-		AddCommentFn: func(context.Context, string, any) (string, error) {
+		AddCommentFn: func(context.Context, string, string) (string, error) {
 			return "", fmt.Errorf("rate limited")
 		},
 	}
@@ -724,7 +715,7 @@ func TestWriteComment_ClientError(t *testing.T) {
 
 func TestWriteEditComment_ClientError(t *testing.T) {
 	mc := &mockClient{
-		UpdateCommentFn: func(context.Context, string, string, any) error {
+		UpdateCommentFn: func(context.Context, string, string, string) error {
 			return fmt.Errorf("not found")
 		},
 	}
@@ -792,12 +783,12 @@ func TestHandleWrite_DryRunLabel(t *testing.T) {
 	assert.Contains(t, text, "DRY RUN")
 }
 
-// --- description ADF in payload ---
+// --- description plain text in payload (Jira Server 7.x) ---
 
-func TestWriteCreate_DescriptionConvertsToADF(t *testing.T) {
+func TestWriteCreate_DescriptionIsPlainText(t *testing.T) {
 	var capturedPayload map[string]any
 	mc := &mockClient{
-		CreateIssueV3Fn: func(_ context.Context, payload map[string]any) (string, string, error) {
+		CreateIssueV2Fn: func(_ context.Context, payload map[string]any) (string, string, error) {
 			// Deep copy via JSON round-trip to capture
 			b, _ := json.Marshal(payload)
 			_ = json.Unmarshal(b, &capturedPayload)
@@ -809,20 +800,15 @@ func TestWriteCreate_DescriptionConvertsToADF(t *testing.T) {
 		Action: "create",
 		Items: []WriteItem{{
 			Project:     "PROJ",
-			Summary:     "ADF test",
+			Summary:     "Plain text test",
 			IssueType:   "Task",
-			Description: "# Heading\n\nParagraph",
+			Description: "# Heading\n\nParagraph", // Jira Server 7.x uses plain text, not ADF
 		}},
 	})
 
 	fields := capturedPayload["fields"].(map[string]any)
-	desc := fields["description"].(map[string]any)
-	assert.Equal(t, float64(1), desc["version"])
-	assert.Equal(t, "doc", desc["type"])
-
-	content := desc["content"].([]any)
-	require.GreaterOrEqual(t, len(content), 2)
-
-	heading := content[0].(map[string]any)
-	assert.Equal(t, "heading", heading["type"])
+	// NOTE: Jira Server 7.x uses plain text, not ADF
+	desc, ok := fields["description"].(string)
+	require.True(t, ok, "description should be plain text string on Jira Server 7.x")
+	assert.Equal(t, "# Heading\n\nParagraph", desc)
 }

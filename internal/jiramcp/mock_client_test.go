@@ -12,13 +12,13 @@ import (
 // test needs; unset methods panic with a clear message.
 type mockClient struct {
 	GetIssueFn           func(ctx context.Context, key string, opts *jira.GetQueryOptions) (*jira.Issue, error)
-	SearchIssuesFn       func(ctx context.Context, jql string, opts *jira.SearchOptionsV3) (*jira.SearchResultV3, error)
-	CreateIssueV3Fn      func(ctx context.Context, payload map[string]any) (string, string, error)
-	UpdateIssueV3Fn      func(ctx context.Context, key string, payload map[string]any) error
+	SearchIssuesFn       func(ctx context.Context, jql string, opts *jira.SearchOptionsV2) (*jira.SearchResultV2, error)
+	CreateIssueV2Fn      func(ctx context.Context, payload map[string]any) (string, string, error)
+	UpdateIssueV2Fn      func(ctx context.Context, key string, payload map[string]any) error
 	DeleteIssueFn        func(ctx context.Context, key string) error
 	DoTransitionFn       func(ctx context.Context, key, transitionID string) error
-	AddCommentFn         func(ctx context.Context, key string, body any) (string, error)
-	UpdateCommentFn      func(ctx context.Context, key, commentID string, body any) error
+	AddCommentFn         func(ctx context.Context, key string, body string) (string, error)
+	UpdateCommentFn      func(ctx context.Context, key, commentID string, body string) error
 	GetAllBoardsFn       func(ctx context.Context, opts *jira.BoardListOptions) ([]jira.Board, bool, error)
 	GetAllSprintsFn      func(ctx context.Context, boardID int, opts *jira.GetAllSprintsOptions) ([]jira.Sprint, bool, error)
 	GetSprintIssuesFn    func(ctx context.Context, sprintID int) ([]jira.Issue, error)
@@ -36,25 +36,25 @@ func (m *mockClient) GetIssue(ctx context.Context, key string, opts *jira.GetQue
 	return m.GetIssueFn(ctx, key, opts)
 }
 
-func (m *mockClient) SearchIssues(ctx context.Context, jql string, opts *jira.SearchOptionsV3) (*jira.SearchResultV3, error) {
+func (m *mockClient) SearchIssues(ctx context.Context, jql string, opts *jira.SearchOptionsV2) (*jira.SearchResultV2, error) {
 	if m.SearchIssuesFn == nil {
 		panic(fmt.Sprintf("mockClient.SearchIssues called but SearchIssuesFn not set (jql=%s)", jql))
 	}
 	return m.SearchIssuesFn(ctx, jql, opts)
 }
 
-func (m *mockClient) CreateIssueV3(ctx context.Context, payload map[string]any) (string, string, error) {
-	if m.CreateIssueV3Fn == nil {
-		panic("mockClient.CreateIssueV3 called but CreateIssueV3Fn not set")
+func (m *mockClient) CreateIssueV2(ctx context.Context, payload map[string]any) (string, string, error) {
+	if m.CreateIssueV2Fn == nil {
+		panic("mockClient.CreateIssueV2 called but CreateIssueV2Fn not set")
 	}
-	return m.CreateIssueV3Fn(ctx, payload)
+	return m.CreateIssueV2Fn(ctx, payload)
 }
 
-func (m *mockClient) UpdateIssueV3(ctx context.Context, key string, payload map[string]any) error {
-	if m.UpdateIssueV3Fn == nil {
-		panic(fmt.Sprintf("mockClient.UpdateIssueV3 called but UpdateIssueV3Fn not set (key=%s)", key))
+func (m *mockClient) UpdateIssueV2(ctx context.Context, key string, payload map[string]any) error {
+	if m.UpdateIssueV2Fn == nil {
+		panic(fmt.Sprintf("mockClient.UpdateIssueV2 called but UpdateIssueV2Fn not set (key=%s)", key))
 	}
-	return m.UpdateIssueV3Fn(ctx, key, payload)
+	return m.UpdateIssueV2Fn(ctx, key, payload)
 }
 
 func (m *mockClient) DeleteIssue(ctx context.Context, key string) error {
@@ -71,14 +71,14 @@ func (m *mockClient) DoTransition(ctx context.Context, key, transitionID string)
 	return m.DoTransitionFn(ctx, key, transitionID)
 }
 
-func (m *mockClient) AddComment(ctx context.Context, key string, body any) (string, error) {
+func (m *mockClient) AddComment(ctx context.Context, key string, body string) (string, error) {
 	if m.AddCommentFn == nil {
 		panic(fmt.Sprintf("mockClient.AddComment called but AddCommentFn not set (key=%s)", key))
 	}
 	return m.AddCommentFn(ctx, key, body)
 }
 
-func (m *mockClient) UpdateComment(ctx context.Context, key, commentID string, body any) error {
+func (m *mockClient) UpdateComment(ctx context.Context, key, commentID string, body string) error {
 	if m.UpdateCommentFn == nil {
 		panic(fmt.Sprintf("mockClient.UpdateComment called but UpdateCommentFn not set (key=%s, commentID=%s)", key, commentID))
 	}

@@ -63,32 +63,36 @@ func (c *Client) GetIssue(ctx context.Context, key string, opts *jira.GetQueryOp
 	return issue, err
 }
 
-// SearchOptionsV3 configures a JQL search via the v3 search/jql endpoint.
-type SearchOptionsV3 struct {
-	MaxResults    int
-	NextPageToken string
-	Fields        []string
-	Expand        string
+// SearchOptionsV2 configures a JQL search via the v2 search endpoint.
+// Uses offset-based pagination (startAt) instead of cursor-based (nextPageToken).
+type SearchOptionsV2 struct {
+	MaxResults int
+	StartAt    int
+	Fields     []string
+	Expand     string
 }
 
-// SearchResultV3 holds the response from a JQL search.
-type SearchResultV3 struct {
-	Issues        []jira.Issue
-	Total         int
-	NextPageToken string
+// SearchResultV2 holds the response from a JQL search.
+type SearchResultV2 struct {
+	Issues     []jira.Issue
+	Total      int
+	StartAt    int
+	MaxResults int
+	IsLast     bool
 }
 
-// SearchIssues runs a JQL query using the v3 search/jql endpoint.
-func (c *Client) SearchIssues(ctx context.Context, jql string, opts *SearchOptionsV3) (*SearchResultV3, error) {
-	var sr SearchResultV3
+// SearchIssues runs a JQL query using the v2 search endpoint.
+// Compatible with Jira Server/Data Center 7.x (uses offset pagination).
+func (c *Client) SearchIssues(ctx context.Context, jql string, opts *SearchOptionsV2) (*SearchResultV2, error) {
+	var sr SearchResultV2
 	err := c.retry(ctx, func() (*jira.Response, error) {
 		body := map[string]any{"jql": jql}
 		if opts != nil {
 			if opts.MaxResults > 0 {
 				body["maxResults"] = opts.MaxResults
 			}
-			if opts.NextPageToken != "" {
-				body["nextPageToken"] = opts.NextPageToken
+			if opts.StartAt > 0 {
+				body["startAt"] = opts.StartAt
 			}
 			if len(opts.Fields) > 0 {
 				body["fields"] = opts.Fields
@@ -96,23 +100,31 @@ func (c *Client) SearchIssues(ctx context.Context, jql string, opts *SearchOptio
 			if opts.Expand != "" {
 				body["expand"] = opts.Expand
 			}
+		} else {
+			// Default maxResults for v2
+			body["maxResults"] = 50
 		}
 
-		req, err := c.j.NewRequestWithContext(ctx, "POST", "rest/api/3/search/jql", body)
+		// Use v2 API endpoint (Jira Server 7.x compatible)
+		req, err := c.j.NewRequestWithContext(ctx, "POST", "rest/api/2/search", body)
 		if err != nil {
 			return nil, err
 		}
 
 		var result struct {
-			Issues        []jira.Issue `json:"issues"`
-			Total         int          `json:"total"`
-			NextPageToken string       `json:"nextPageToken"`
+			Issues     []jira.Issue `json:"issues"`
+			Total      int          `json:"total"`
+			StartAt    int          `json:"startAt"`
+			MaxResults int          `json:"maxResults"`
+			IsLast     bool         `json:"isLast"`
 		}
 		resp, err := c.j.Do(req, &result)
-		sr = SearchResultV3{
-			Issues:        result.Issues,
-			Total:         result.Total,
-			NextPageToken: result.NextPageToken,
+		sr = SearchResultV2{
+			Issues:     result.Issues,
+			Total:      result.Total,
+			StartAt:    result.StartAt,
+			MaxResults: result.MaxResults,
+			IsLast:     result.IsLast,
 		}
 		return resp, err
 	})
@@ -147,12 +159,14 @@ func (c *Client) DoTransition(ctx context.Context, key, transitionID string) err
 	})
 }
 
-// AddComment adds a comment to an issue using REST API v3 (ADF body).
-// The body should be an ADF document map or plain text string.
-func (c *Client) AddComment(ctx context.Context, key string, body any) (string, error) {
+// AddComment adds a comment to an issue using REST API v2.
+// Compatible with Jira Server/Data Center 7.x.
+// The body is a plain text string (wiki markup supported).
+func (c *Client) AddComment(ctx context.Context, key string, body string) (string, error) {
 	var commentID string
 	err := c.retry(ctx, func() (*jira.Response, error) {
-		path := fmt.Sprintf("rest/api/3/issue/%s/comment", key)
+		// Use v2 API endpoint (Jira Server 7.x compatible)
+		path := fmt.Sprintf("rest/api/2/issue/%s/comment", key)
 		payload := map[string]any{"body": body}
 		req, err := c.j.NewRequestWithContext(ctx, "POST", path, payload)
 		if err != nil {
@@ -168,10 +182,13 @@ func (c *Client) AddComment(ctx context.Context, key string, body any) (string, 
 	return commentID, err
 }
 
-// UpdateComment updates a comment using REST API v3 (ADF body).
-func (c *Client) UpdateComment(ctx context.Context, key, commentID string, body any) error {
+// UpdateComment updates a comment using REST API v2.
+// Compatible with Jira Server/Data Center 7.x.
+// The body is a plain text string (wiki markup supported).
+func (c *Client) UpdateComment(ctx context.Context, key, commentID string, body string) error {
 	return c.retry(ctx, func() (*jira.Response, error) {
-		path := fmt.Sprintf("rest/api/3/issue/%s/comment/%s", key, commentID)
+		// Use v2 API endpoint (Jira Server 7.x compatible)
+		path := fmt.Sprintf("rest/api/2/issue/%s/comment/%s", key, commentID)
 		payload := map[string]any{"body": body}
 		req, err := c.j.NewRequestWithContext(ctx, "PUT", path, payload)
 		if err != nil {
@@ -256,12 +273,14 @@ func (c *Client) GetFields(ctx context.Context) ([]jira.Field, error) {
 	return fields, err
 }
 
-// CreateIssueV3 creates an issue using REST API v3 with raw JSON payload.
-// This allows passing ADF description as a proper JSON object.
-func (c *Client) CreateIssueV3(ctx context.Context, payload map[string]any) (string, string, error) {
+// CreateIssueV2 creates an issue using REST API v2 with raw JSON payload.
+// Compatible with Jira Server/Data Center 7.x.
+// Note: Rich text (ADF) is NOT supported; use plain text or wiki markup for descriptions.
+func (c *Client) CreateIssueV2(ctx context.Context, payload map[string]any) (string, string, error) {
 	var key, id string
 	err := c.retry(ctx, func() (*jira.Response, error) {
-		req, err := c.j.NewRequestWithContext(ctx, "POST", "rest/api/3/issue", payload)
+		// Use v2 API endpoint (Jira Server 7.x compatible)
+		req, err := c.j.NewRequestWithContext(ctx, "POST", "rest/api/2/issue", payload)
 		if err != nil {
 			return nil, err
 		}
@@ -277,10 +296,13 @@ func (c *Client) CreateIssueV3(ctx context.Context, payload map[string]any) (str
 	return key, id, err
 }
 
-// UpdateIssueV3 updates an issue using REST API v3 with raw JSON payload.
-func (c *Client) UpdateIssueV3(ctx context.Context, key string, payload map[string]any) error {
+// UpdateIssueV2 updates an issue using REST API v2 with raw JSON payload.
+// Compatible with Jira Server/Data Center 7.x.
+// Note: Rich text (ADF) is NOT supported; use plain text or wiki markup for descriptions.
+func (c *Client) UpdateIssueV2(ctx context.Context, key string, payload map[string]any) error {
 	return c.retry(ctx, func() (*jira.Response, error) {
-		path := fmt.Sprintf("rest/api/3/issue/%s", key)
+		// Use v2 API endpoint (Jira Server 7.x compatible)
+		path := fmt.Sprintf("rest/api/2/issue/%s", key)
 		req, err := c.j.NewRequestWithContext(ctx, "PUT", path, payload)
 		if err != nil {
 			return nil, err
@@ -290,67 +312,18 @@ func (c *Client) UpdateIssueV3(ctx context.Context, key string, payload map[stri
 	})
 }
 
-// GetFieldOptions returns options for a custom field, aggregated across all contexts.
+// NOTE: GetFieldOptions is NOT supported on Jira Server/Data Center 7.x
+// The field options API (/rest/api/3/field/{id}/context) only exists in Cloud API v3.
+// Jira Server 7.x REST API v2 does not provide an equivalent endpoint.
+//
+// If you need field options, consider:
+// 1. Querying the createmeta endpoint: GET /rest/api/2/issue/createmeta
+// 2. Looking up allowedValues in editmeta: GET /rest/api/2/issue/{issueKey}/editmeta
+// 3. Using Jira's UI to find field option IDs
 func (c *Client) GetFieldOptions(ctx context.Context, fieldID string) ([]json.RawMessage, error) {
-	// Fetch all contexts for the field.
-	var contextIDs []string
-	err := c.retry(ctx, func() (*jira.Response, error) {
-		path := fmt.Sprintf("rest/api/3/field/%s/context", fieldID)
-		req, err := c.j.NewRequestWithContext(ctx, "GET", path, nil)
-		if err != nil {
-			return nil, err
-		}
-		var ctxResult struct {
-			Values []struct {
-				ID string `json:"id"`
-			} `json:"values"`
-		}
-		resp, err := c.j.Do(req, &ctxResult)
-		if err != nil {
-			return resp, err
-		}
-		for _, v := range ctxResult.Values {
-			contextIDs = append(contextIDs, v.ID)
-		}
-		return resp, nil
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	// Fetch options from each context, deduplicating by id.
-	seen := make(map[string]bool)
-	var values []json.RawMessage
-	for _, contextID := range contextIDs {
-		err := c.retry(ctx, func() (*jira.Response, error) {
-			optPath := fmt.Sprintf("rest/api/3/field/%s/context/%s/option", fieldID, contextID)
-			optReq, err := c.j.NewRequestWithContext(ctx, "GET", optPath, nil)
-			if err != nil {
-				return nil, err
-			}
-			var optResult struct {
-				Values []json.RawMessage `json:"values"`
-			}
-			resp, err := c.j.Do(optReq, &optResult)
-			if err != nil {
-				return resp, err
-			}
-			for _, raw := range optResult.Values {
-				var id struct {
-					ID string `json:"id"`
-				}
-				if jsonErr := json.Unmarshal(raw, &id); jsonErr == nil && !seen[id.ID] {
-					seen[id.ID] = true
-					values = append(values, raw)
-				}
-			}
-			return resp, nil
-		})
-		if err != nil {
-			return nil, err
-		}
-	}
-	return values, nil
+	// UNSUPPORTED: Jira Server 7.x REST API v2 does not have field options endpoint.
+	// This functionality only exists in Jira Cloud REST API v3.
+	return nil, fmt.Errorf("field_options is not supported on Jira Server 7.x: REST API v2 does not provide an endpoint for custom field options")
 }
 
 func (c *Client) shouldRetry(resp *jira.Response) (time.Duration, bool) {

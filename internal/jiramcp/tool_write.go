@@ -7,8 +7,6 @@ import (
 	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-
-	"github.com/mmatczuk/jira-mcp/internal/mdconv"
 )
 
 type WriteItem struct {
@@ -17,13 +15,13 @@ type WriteItem struct {
 	Summary     string   `json:"summary,omitempty" jsonschema:"Issue summary/title."`
 	IssueType   string   `json:"issue_type,omitempty" jsonschema:"Issue type name (e.g. Bug, Task, Story, Epic)."`
 	Priority    string   `json:"priority,omitempty" jsonschema:"Priority name (e.g. High, Medium, Low)."`
-	Assignee    string   `json:"assignee,omitempty" jsonschema:"Assignee account ID."`
-	Description string   `json:"description,omitempty" jsonschema:"Issue description in Markdown. Auto-converted to Atlassian Document Format."`
+	Assignee    string   `json:"assignee,omitempty" jsonschema:"Assignee username (not accountId - Jira Server 7.x uses username)."`
+	Description string   `json:"description,omitempty" jsonschema:"Issue description in plain text or wiki markup. Note: ADF (Atlassian Document Format) is NOT supported on Jira Server 7.x."`
 	Labels      []string `json:"labels,omitempty" jsonschema:"Issue labels."`
 
 	TransitionID string `json:"transition_id,omitempty" jsonschema:"Transition ID. Use jira_schema resource=transitions issue_key=X to find valid IDs."`
 
-	Comment   string `json:"comment,omitempty" jsonschema:"Comment body in Markdown. Used for comment/edit_comment and optionally with transition."`
+	Comment   string `json:"comment,omitempty" jsonschema:"Comment body in plain text or wiki markup. Note: ADF is NOT supported on Jira Server 7.x."`
 	CommentID string `json:"comment_id,omitempty" jsonschema:"Comment ID for edit_comment action."`
 
 	SprintID int `json:"sprint_id,omitempty" jsonschema:"Sprint ID for move_to_sprint action."`
@@ -41,16 +39,21 @@ var writeTool = &mcp.Tool{
 	Name: "jira_write",
 	Description: `Modify JIRA data. Batch-first: pass an array of items even for single operations.
 
+NOTE: This version is designed for Jira Server/Data Center 7.x (REST API v2).
+- Rich text (ADF/Atlassian Document Format) is NOT supported. Use plain text or wiki markup.
+- Assignee uses username, not accountId.
+- field_options discovery is NOT supported (no equivalent in REST API v2).
+
 Actions:
-- create: Create issues. Each item needs: project, summary, issue_type. Optional: description (Markdown), assignee, priority, labels, fields_json.
+- create: Create issues. Each item needs: project, summary, issue_type. Optional: description (plain text/wiki), assignee (username), priority, labels, fields_json.
 - update: Update issues. Each item needs: key. Provide fields to change: summary, description, assignee, priority, labels, fields_json.
 - delete: Delete issues. Each item needs: key.
-- transition: Transition issues. Each item needs: key, transition_id. Optional: comment (Markdown). Hint: Use jira_schema resource=transitions to find IDs.
-- comment: Add comments. Each item needs: key, comment (Markdown).
-- edit_comment: Edit comments. Each item needs: key, comment_id, comment (Markdown).
+- transition: Transition issues. Each item needs: key, transition_id. Optional: comment. Hint: Use jira_schema resource=transitions to find IDs.
+- comment: Add comments. Each item needs: key, comment (plain text/wiki).
+- edit_comment: Edit comments. Each item needs: key, comment_id, comment (plain text/wiki).
 - move_to_sprint: Move issues to a sprint. Each item needs: key, sprint_id.
 
-All actions support dry_run=true to preview without executing. Descriptions and comments accept Markdown.`,
+All actions support dry_run=true to preview without executing.`,
 }
 
 func (h *handlers) handleWrite(ctx context.Context, _ *mcp.CallToolRequest, args WriteArgs) (*mcp.CallToolResult, any, error) {
@@ -154,7 +157,9 @@ func (h *handlers) handleMoveToSprint(ctx context.Context, args WriteArgs) *mcp.
 	return textResult(out, false)
 }
 
-// buildIssuePayload constructs a v3 API payload with ADF description.
+// buildIssuePayload constructs a v2 API payload compatible with Jira Server 7.x.
+// Uses plain text/wiki markup instead of ADF (Atlassian Document Format).
+// Assignee uses username (name) instead of accountId.
 func buildIssuePayload(item WriteItem) (map[string]any, error) {
 	fields := map[string]any{}
 
@@ -171,16 +176,16 @@ func buildIssuePayload(item WriteItem) (map[string]any, error) {
 		fields["priority"] = map[string]any{"name": item.Priority}
 	}
 	if item.Assignee != "" {
-		fields["assignee"] = map[string]any{"accountId": item.Assignee}
+		// NOTE: Jira Server 7.x uses "name" (username), not "accountId" (Cloud)
+		fields["assignee"] = map[string]any{"name": item.Assignee}
 	}
 	if item.Labels != nil {
 		fields["labels"] = item.Labels
 	}
 	if item.Description != "" {
-		adf := mdconv.ToADF(item.Description)
-		if adf != nil {
-			fields["description"] = adf
-		}
+		// NOTE: Jira Server 7.x uses plain text or wiki markup, NOT ADF
+		// ADF (Atlassian Document Format) is only supported in Jira Cloud REST API v3
+		fields["description"] = item.Description
 	}
 	if item.FieldsJSON != "" {
 		var extra map[string]any
@@ -195,25 +200,14 @@ func buildIssuePayload(item WriteItem) (map[string]any, error) {
 	return map[string]any{"fields": fields}, nil
 }
 
-// buildCommentBody converts markdown to an ADF body or falls back to plain text ADF.
-func buildCommentBody(markdown string) any {
-	adf := mdconv.ToADF(markdown)
-	if adf != nil {
-		return adf
-	}
-	// Fallback: wrap plain text in minimal ADF.
-	return map[string]any{
-		"version": 1,
-		"type":    "doc",
-		"content": []any{
-			map[string]any{
-				"type": "paragraph",
-				"content": []any{
-					map[string]any{"type": "text", "text": markdown},
-				},
-			},
-		},
-	}
+// buildCommentBody returns the comment body as plain text.
+// NOTE: Jira Server 7.x REST API v2 does NOT support ADF (Atlassian Document Format).
+// Only plain text or wiki markup is accepted for comments.
+func buildCommentBody(text string) string {
+	// Return plain text directly
+	// Wiki markup can be used for formatting (e.g., *bold*, //italic//, etc.)
+	// ADF conversion is not supported on Jira Server 7.x
+	return text
 }
 
 func (h *handlers) writeCreate(ctx context.Context, item WriteItem, dryRun bool) (string, error) {
@@ -231,7 +225,8 @@ func (h *handlers) writeCreate(ctx context.Context, item WriteItem, dryRun bool)
 		return fmt.Sprintf("Would create issue in project %s with type %s:\n%s", item.Project, item.IssueType, string(data)), nil
 	}
 
-	key, _, err := h.client.CreateIssueV3(ctx, payload)
+	// Use v2 API (Jira Server 7.x compatible)
+	key, _, err := h.client.CreateIssueV2(ctx, payload)
 	if err != nil {
 		return "", fmt.Errorf("failed to create issue in %s: %w. Hint: Check project key and issue type name are valid. Use jira_schema resource=fields to see available fields", item.Project, err)
 	}
@@ -254,7 +249,8 @@ func (h *handlers) writeUpdate(ctx context.Context, item WriteItem, dryRun bool)
 		return fmt.Sprintf("Would update %s with:\n%s", item.Key, string(data)), nil
 	}
 
-	if err := h.client.UpdateIssueV3(ctx, item.Key, payload); err != nil {
+	// Use v2 API (Jira Server 7.x compatible)
+	if err := h.client.UpdateIssueV2(ctx, item.Key, payload); err != nil {
 		return "", fmt.Errorf("failed to update %s: %w", item.Key, err)
 	}
 
@@ -342,5 +338,3 @@ func (h *handlers) writeEditComment(ctx context.Context, item WriteItem, dryRun 
 
 	return fmt.Sprintf("Updated comment %s on %s.", item.CommentID, item.Key), nil
 }
-
-
