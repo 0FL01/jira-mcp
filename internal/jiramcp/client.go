@@ -33,4 +33,9 @@ type JiraClient interface {
 	GetTransitions(ctx context.Context, key string) ([]jira.Transition, error)
 	// GetFieldOptions is NOT supported on Jira Server 7.x - returns error
 	GetFieldOptions(ctx context.Context, fieldID string) ([]json.RawMessage, error)
+	// Worklog methods for time tracking (Jira Server 7.x REST API v2)
+	GetWorklogs(ctx context.Context, issueKey string) (*jira.WorklogList, error)
+	AddWorklog(ctx context.Context, issueKey string, input jira.WorklogInput, adjustEstimate jira.EstimateAdjustment, newEstimate, reduceBy string) (*jira.Worklog, error)
+	UpdateWorklog(ctx context.Context, issueKey, worklogID string, input jira.WorklogInput, adjustEstimate jira.EstimateAdjustment, newEstimate string) (*jira.Worklog, error)
+	DeleteWorklog(ctx context.Context, issueKey, worklogID string, adjustEstimate jira.EstimateAdjustment, newEstimate, increaseBy string) error
 }

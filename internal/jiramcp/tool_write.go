@@ -6,11 +6,12 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/mmatczuk/jira-mcp/internal/jira"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 type WriteItem struct {
-	Key         string   `json:"key,omitempty" jsonschema:"Issue key (e.g. PROJ-1). Required for update/delete/transition/comment/edit_comment."`
+	Key         string   `json:"key,omitempty" jsonschema:"Issue key (e.g. PROJ-1). Required for update/delete/transition/comment/edit_comment/worklog actions."`
 	Project     string   `json:"project,omitempty" jsonschema:"Project key for create action."`
 	Summary     string   `json:"summary,omitempty" jsonschema:"Issue summary/title."`
 	IssueType   string   `json:"issue_type,omitempty" jsonschema:"Issue type name (e.g. Bug, Task, Story, Epic)."`
@@ -21,12 +22,26 @@ type WriteItem struct {
 
 	TransitionID string `json:"transition_id,omitempty" jsonschema:"Transition ID. Use jira_schema resource=transitions issue_key=X to find valid IDs."`
 
-	Comment   string `json:"comment,omitempty" jsonschema:"Comment body in plain text or wiki markup. Note: ADF is NOT supported on Jira Server 7.x."`
+	Comment   string `json:"comment,omitempty" jsonschema:"Comment body in plain text or wiki markup. Note: ADF is NOT supported on Jira Server 7.x. Also used as worklog comment."`
 	CommentID string `json:"comment_id,omitempty" jsonschema:"Comment ID for edit_comment action."`
 
 	SprintID int `json:"sprint_id,omitempty" jsonschema:"Sprint ID for move_to_sprint action."`
 
 	FieldsJSON string `json:"fields_json,omitempty" jsonschema:"Raw JSON object merged into issue fields. Escape hatch for custom fields."`
+
+	// Worklog fields
+	TimeSpent        string `json:"time_spent,omitempty" jsonschema:"Time spent (e.g., '3h 20m', '1d', '30m', '1h 30m'). Required for add_worklog action. Either time_spent or time_spent_seconds must be provided."`
+	TimeSpentSeconds int    `json:"time_spent_seconds,omitempty" jsonschema:"Time spent in seconds. Alternative to time_spent."`
+	Started          string `json:"started,omitempty" jsonschema:"When work started (ISO 8601 format, e.g., '2024-01-15T10:30:00.000+0000'). Defaults to current time if not specified."`
+	WorklogID        string `json:"worklog_id,omitempty" jsonschema:"Worklog ID for update_worklog and delete_worklog actions."`
+	VisibilityType   string `json:"visibility_type,omitempty" jsonschema:"Visibility restriction type for worklog: 'group' or 'role'."`
+	VisibilityValue  string `json:"visibility_value,omitempty" jsonschema:"Group or role name for worklog visibility restriction."`
+
+	// Estimate adjustment for worklog actions
+	AdjustEstimate string `json:"adjust_estimate,omitempty" jsonschema:"How to adjust remaining estimate: 'auto' (default), 'leave', 'new', 'manual'."`
+	NewEstimate    string `json:"new_estimate,omitempty" jsonschema:"New estimate value when adjust_estimate='new' (e.g., '2d', '4h')."`
+	ReduceBy       string `json:"reduce_by,omitempty" jsonschema:"Amount to reduce estimate by when adjust_estimate='manual' for add_worklog (e.g., '2h')."`
+	IncreaseBy     string `json:"increase_by,omitempty" jsonschema:"Amount to increase estimate by when adjust_estimate='manual' for delete_worklog (e.g., '2h')."`
 }
 
 type WriteArgs struct {
@@ -52,6 +67,11 @@ Actions:
 - comment: Add comments. Each item needs: key, comment (plain text/wiki).
 - edit_comment: Edit comments. Each item needs: key, comment_id, comment (plain text/wiki).
 - move_to_sprint: Move issues to a sprint. Each item needs: key, sprint_id.
+- add_worklog: Add time tracking entry. Each item needs: key, time_spent (e.g., '3h 20m') OR time_spent_seconds. Optional: comment, started (ISO 8601), adjust_estimate, new_estimate, reduce_by, visibility_type, visibility_value.
+- update_worklog: Update worklog. Each item needs: key, worklog_id. Optional: time_spent, time_spent_seconds, comment, started, adjust_estimate, new_estimate, visibility_type, visibility_value.
+- delete_worklog: Delete worklog. Each item needs: key, worklog_id. Optional: adjust_estimate, new_estimate, increase_by.
+
+Time tracking note: timetracking/timeSpent/worklog fields are read-only in Jira Server. Use add_worklog action instead.
 
 All actions support dry_run=true to preview without executing.`,
 }
@@ -85,8 +105,14 @@ func (h *handlers) handleWrite(ctx context.Context, _ *mcp.CallToolRequest, args
 			msg, err = h.writeComment(ctx, item, args.DryRun)
 		case "edit_comment":
 			msg, err = h.writeEditComment(ctx, item, args.DryRun)
+		case "add_worklog":
+			msg, err = h.writeAddWorklog(ctx, item, args.DryRun)
+		case "update_worklog":
+			msg, err = h.writeUpdateWorklog(ctx, item, args.DryRun)
+		case "delete_worklog":
+			msg, err = h.writeDeleteWorklog(ctx, item, args.DryRun)
 		default:
-			return textResult(fmt.Sprintf("Unknown action %q. Valid: create, update, delete, transition, comment, edit_comment, move_to_sprint.", args.Action), true), nil, nil
+			return textResult(fmt.Sprintf("Unknown action %q. Valid: create, update, delete, transition, comment, edit_comment, move_to_sprint, add_worklog, update_worklog, delete_worklog.", args.Action), true), nil, nil
 		}
 
 		if err != nil {
@@ -337,4 +363,173 @@ func (h *handlers) writeEditComment(ctx context.Context, item WriteItem, dryRun 
 	}
 
 	return fmt.Sprintf("Updated comment %s on %s.", item.CommentID, item.Key), nil
+}
+
+// buildWorklogInput creates a WorklogInput from WriteItem fields.
+func buildWorklogInput(item WriteItem) jira.WorklogInput {
+	input := jira.WorklogInput{
+		Comment:          item.Comment,
+		Started:          item.Started,
+		TimeSpent:        item.TimeSpent,
+		TimeSpentSeconds: item.TimeSpentSeconds,
+	}
+
+	if item.VisibilityType != "" && item.VisibilityValue != "" {
+		input.Visibility = &jira.Visibility{
+			Type:  item.VisibilityType,
+			Value: item.VisibilityValue,
+		}
+	}
+
+	return input
+}
+
+// parseEstimateAdjustment converts string to EstimateAdjustment type.
+func parseEstimateAdjustment(s string) jira.EstimateAdjustment {
+	switch s {
+	case "new":
+		return jira.EstimateNew
+	case "leave":
+		return jira.EstimateLeave
+	case "manual":
+		return jira.EstimateManual
+	default:
+		return jira.EstimateAuto
+	}
+}
+
+func (h *handlers) writeAddWorklog(ctx context.Context, item WriteItem, dryRun bool) (string, error) {
+	if item.Key == "" {
+		return "", fmt.Errorf("add_worklog requires key")
+	}
+
+	if item.TimeSpent == "" && item.TimeSpentSeconds == 0 {
+		return "", fmt.Errorf("add_worklog requires time_spent (e.g., '3h 20m') or time_spent_seconds")
+	}
+
+	input := buildWorklogInput(item)
+	adjustEstimate := parseEstimateAdjustment(item.AdjustEstimate)
+
+	if dryRun {
+		var details []string
+		if item.TimeSpent != "" {
+			details = append(details, fmt.Sprintf("time_spent=%s", item.TimeSpent))
+		}
+		if item.TimeSpentSeconds != 0 {
+			details = append(details, fmt.Sprintf("time_spent_seconds=%d", item.TimeSpentSeconds))
+		}
+		if item.Started != "" {
+			details = append(details, fmt.Sprintf("started=%s", item.Started))
+		}
+		if item.Comment != "" {
+			details = append(details, fmt.Sprintf("comment=%q", item.Comment))
+		}
+		if item.AdjustEstimate != "" {
+			details = append(details, fmt.Sprintf("adjust_estimate=%s", item.AdjustEstimate))
+		}
+		if item.NewEstimate != "" {
+			details = append(details, fmt.Sprintf("new_estimate=%s", item.NewEstimate))
+		}
+		if item.ReduceBy != "" {
+			details = append(details, fmt.Sprintf("reduce_by=%s", item.ReduceBy))
+		}
+
+		return fmt.Sprintf("Would add worklog to %s with %s.", item.Key, strings.Join(details, ", ")), nil
+	}
+
+	worklog, err := h.client.AddWorklog(ctx, item.Key, input, adjustEstimate, item.NewEstimate, item.ReduceBy)
+	if err != nil {
+		return "", fmt.Errorf("failed to add worklog to %s: %w. Hint: Ensure time tracking is enabled in Jira project settings and you have 'Work On Issues' permission", item.Key, err)
+	}
+
+	var timeInfo string
+	if worklog.TimeSpent != "" {
+		timeInfo = worklog.TimeSpent
+	} else {
+		timeInfo = fmt.Sprintf("%d seconds", worklog.TimeSpentSeconds)
+	}
+
+	return fmt.Sprintf("Added worklog to %s (id=%s, time=%s).", item.Key, worklog.ID, timeInfo), nil
+}
+
+func (h *handlers) writeUpdateWorklog(ctx context.Context, item WriteItem, dryRun bool) (string, error) {
+	if item.Key == "" || item.WorklogID == "" {
+		return "", fmt.Errorf("update_worklog requires key and worklog_id")
+	}
+
+	// At least one field to update must be provided
+	if item.TimeSpent == "" && item.TimeSpentSeconds == 0 && item.Comment == "" && item.Started == "" {
+		return "", fmt.Errorf("update_worklog requires at least one field to update: time_spent, time_spent_seconds, comment, or started")
+	}
+
+	input := buildWorklogInput(item)
+	adjustEstimate := parseEstimateAdjustment(item.AdjustEstimate)
+
+	if dryRun {
+		var details []string
+		if item.TimeSpent != "" {
+			details = append(details, fmt.Sprintf("time_spent=%s", item.TimeSpent))
+		}
+		if item.TimeSpentSeconds != 0 {
+			details = append(details, fmt.Sprintf("time_spent_seconds=%d", item.TimeSpentSeconds))
+		}
+		if item.Started != "" {
+			details = append(details, fmt.Sprintf("started=%s", item.Started))
+		}
+		if item.Comment != "" {
+			details = append(details, fmt.Sprintf("comment=%q", item.Comment))
+		}
+		if item.AdjustEstimate != "" {
+			details = append(details, fmt.Sprintf("adjust_estimate=%s", item.AdjustEstimate))
+		}
+
+		return fmt.Sprintf("Would update worklog %s on %s with %s.", item.WorklogID, item.Key, strings.Join(details, ", ")), nil
+	}
+
+	worklog, err := h.client.UpdateWorklog(ctx, item.Key, item.WorklogID, input, adjustEstimate, item.NewEstimate)
+	if err != nil {
+		return "", fmt.Errorf("failed to update worklog %s on %s: %w", item.WorklogID, item.Key, err)
+	}
+
+	var timeInfo string
+	if worklog.TimeSpent != "" {
+		timeInfo = worklog.TimeSpent
+	} else {
+		timeInfo = fmt.Sprintf("%d seconds", worklog.TimeSpentSeconds)
+	}
+
+	return fmt.Sprintf("Updated worklog %s on %s (time=%s).", item.WorklogID, item.Key, timeInfo), nil
+}
+
+func (h *handlers) writeDeleteWorklog(ctx context.Context, item WriteItem, dryRun bool) (string, error) {
+	if item.Key == "" || item.WorklogID == "" {
+		return "", fmt.Errorf("delete_worklog requires key and worklog_id")
+	}
+
+	adjustEstimate := parseEstimateAdjustment(item.AdjustEstimate)
+
+	if dryRun {
+		var details []string
+		if item.AdjustEstimate != "" {
+			details = append(details, fmt.Sprintf("adjust_estimate=%s", item.AdjustEstimate))
+		}
+		if item.NewEstimate != "" {
+			details = append(details, fmt.Sprintf("new_estimate=%s", item.NewEstimate))
+		}
+		if item.IncreaseBy != "" {
+			details = append(details, fmt.Sprintf("increase_by=%s", item.IncreaseBy))
+		}
+
+		msg := fmt.Sprintf("Would delete worklog %s from %s", item.WorklogID, item.Key)
+		if len(details) > 0 {
+			msg += fmt.Sprintf(" with %s", strings.Join(details, ", "))
+		}
+		return msg + ".", nil
+	}
+
+	if err := h.client.DeleteWorklog(ctx, item.Key, item.WorklogID, adjustEstimate, item.NewEstimate, item.IncreaseBy); err != nil {
+		return "", fmt.Errorf("failed to delete worklog %s from %s: %w", item.WorklogID, item.Key, err)
+	}
+
+	return fmt.Sprintf("Deleted worklog %s from %s.", item.WorklogID, item.Key), nil
 }

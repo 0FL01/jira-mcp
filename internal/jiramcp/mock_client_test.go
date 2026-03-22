@@ -140,3 +140,19 @@ func (m *mockClient) GetFieldOptions(ctx context.Context, fieldID string) ([]jso
 	}
 	return m.GetFieldOptionsFn(ctx, fieldID)
 }
+
+func (m *mockClient) GetWorklogs(ctx context.Context, issueKey string) (*jira.WorklogList, error) {
+	panic(fmt.Sprintf("mockClient.GetWorklogs not implemented (issueKey=%s)", issueKey))
+}
+
+func (m *mockClient) AddWorklog(ctx context.Context, issueKey string, input jira.WorklogInput, adjustEstimate jira.EstimateAdjustment, newEstimate, reduceBy string) (*jira.Worklog, error) {
+	panic(fmt.Sprintf("mockClient.AddWorklog not implemented (issueKey=%s)", issueKey))
+}
+
+func (m *mockClient) UpdateWorklog(ctx context.Context, issueKey, worklogID string, input jira.WorklogInput, adjustEstimate jira.EstimateAdjustment, newEstimate string) (*jira.Worklog, error) {
+	panic(fmt.Sprintf("mockClient.UpdateWorklog not implemented (issueKey=%s, worklogID=%s)", issueKey, worklogID))
+}
+
+func (m *mockClient) DeleteWorklog(ctx context.Context, issueKey, worklogID string, adjustEstimate jira.EstimateAdjustment, newEstimate, increaseBy string) error {
+	panic(fmt.Sprintf("mockClient.DeleteWorklog not implemented (issueKey=%s, worklogID=%s)", issueKey, worklogID))
+}

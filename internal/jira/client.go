@@ -326,6 +326,129 @@ func (c *Client) GetFieldOptions(ctx context.Context, fieldID string) ([]json.Ra
 	return nil, fmt.Errorf("field_options is not supported on Jira Server 7.x: REST API v2 does not provide an endpoint for custom field options")
 }
 
+// GetWorklogs returns all worklogs for an issue.
+// GET /rest/api/2/issue/{issueIdOrKey}/worklog
+func (c *Client) GetWorklogs(ctx context.Context, issueKey string) (*WorklogList, error) {
+	var result WorklogList
+	err := c.retry(ctx, func() (*jira.Response, error) {
+		path := fmt.Sprintf("rest/api/2/issue/%s/worklog", issueKey)
+		req, err := c.j.NewRequestWithContext(ctx, "GET", path, nil)
+		if err != nil {
+			return nil, err
+		}
+		resp, err := c.j.Do(req, &result)
+		return resp, err
+	})
+	return &result, err
+}
+
+// AddWorklog adds a worklog to an issue.
+// POST /rest/api/2/issue/{issueIdOrKey}/worklog
+// The adjustEstimate parameter controls how the remaining estimate is adjusted:
+//   - "auto": automatically adjusts (default)
+//   - "new": sets to newEstimate value
+//   - "leave": leaves unchanged
+//   - "manual": reduces by reduceBy value
+func (c *Client) AddWorklog(ctx context.Context, issueKey string, input WorklogInput, adjustEstimate EstimateAdjustment, newEstimate, reduceBy string) (*Worklog, error) {
+	var result Worklog
+	err := c.retry(ctx, func() (*jira.Response, error) {
+		path := fmt.Sprintf("rest/api/2/issue/%s/worklog", issueKey)
+
+		// Build query parameters
+		params := make([]string, 0)
+		if adjustEstimate != "" {
+			params = append(params, fmt.Sprintf("adjustEstimate=%s", adjustEstimate))
+		}
+		if newEstimate != "" {
+			params = append(params, fmt.Sprintf("newEstimate=%s", newEstimate))
+		}
+		if reduceBy != "" {
+			params = append(params, fmt.Sprintf("reduceBy=%s", reduceBy))
+		}
+		if len(params) > 0 {
+			path = path + "?" + strings.Join(params, "&")
+		}
+
+		req, err := c.j.NewRequestWithContext(ctx, "POST", path, input)
+		if err != nil {
+			return nil, err
+		}
+		resp, err := c.j.Do(req, &result)
+		return resp, err
+	})
+	return &result, err
+}
+
+// UpdateWorklog updates an existing worklog.
+// PUT /rest/api/2/issue/{issueIdOrKey}/worklog/{id}
+// The adjustEstimate parameter controls how the remaining estimate is adjusted:
+//   - "auto": automatically adjusts (default)
+//   - "new": sets to newEstimate value
+//   - "leave": leaves unchanged
+//
+// Note: "manual" is not supported for updates in Jira 7.5.0
+func (c *Client) UpdateWorklog(ctx context.Context, issueKey, worklogID string, input WorklogInput, adjustEstimate EstimateAdjustment, newEstimate string) (*Worklog, error) {
+	var result Worklog
+	err := c.retry(ctx, func() (*jira.Response, error) {
+		path := fmt.Sprintf("rest/api/2/issue/%s/worklog/%s", issueKey, worklogID)
+
+		// Build query parameters
+		params := make([]string, 0)
+		if adjustEstimate != "" {
+			params = append(params, fmt.Sprintf("adjustEstimate=%s", adjustEstimate))
+		}
+		if newEstimate != "" {
+			params = append(params, fmt.Sprintf("newEstimate=%s", newEstimate))
+		}
+		if len(params) > 0 {
+			path = path + "?" + strings.Join(params, "&")
+		}
+
+		req, err := c.j.NewRequestWithContext(ctx, "PUT", path, input)
+		if err != nil {
+			return nil, err
+		}
+		resp, err := c.j.Do(req, &result)
+		return resp, err
+	})
+	return &result, err
+}
+
+// DeleteWorklog deletes a worklog.
+// DELETE /rest/api/2/issue/{issueIdOrKey}/worklog/{id}
+// The adjustEstimate parameter controls how the remaining estimate is adjusted:
+//   - "auto": automatically adjusts (default)
+//   - "new": sets to newEstimate value
+//   - "leave": leaves unchanged
+//   - "manual": increases by increaseBy value
+func (c *Client) DeleteWorklog(ctx context.Context, issueKey, worklogID string, adjustEstimate EstimateAdjustment, newEstimate, increaseBy string) error {
+	return c.retry(ctx, func() (*jira.Response, error) {
+		path := fmt.Sprintf("rest/api/2/issue/%s/worklog/%s", issueKey, worklogID)
+
+		// Build query parameters
+		params := make([]string, 0)
+		if adjustEstimate != "" {
+			params = append(params, fmt.Sprintf("adjustEstimate=%s", adjustEstimate))
+		}
+		if newEstimate != "" {
+			params = append(params, fmt.Sprintf("newEstimate=%s", newEstimate))
+		}
+		if increaseBy != "" {
+			params = append(params, fmt.Sprintf("increaseBy=%s", increaseBy))
+		}
+		if len(params) > 0 {
+			path = path + "?" + strings.Join(params, "&")
+		}
+
+		req, err := c.j.NewRequestWithContext(ctx, "DELETE", path, nil)
+		if err != nil {
+			return nil, err
+		}
+		resp, err := c.j.Do(req, nil)
+		return resp, err
+	})
+}
+
 func (c *Client) shouldRetry(resp *jira.Response) (time.Duration, bool) {
 	if resp == nil {
 		return 0, false

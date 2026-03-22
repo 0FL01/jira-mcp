@@ -26,14 +26,15 @@ func NewServer(client JiraClient) *mcp.Server {
 	return s
 }
 
-const instructions = `JIRA MCP Server — interact with JIRA Cloud via three tools:
+const instructions = `JIRA MCP Server — interact with JIRA Server/Data Center 7.x via three tools:
 
 - jira_read: Fetch issues by key, search by JQL, or list resources (projects, boards, sprints, sprint issues).
-- jira_write: Create, update, delete, transition issues; add/edit comments; move issues to sprints. Supports batch (array of items). Always has dry_run option.
-- jira_schema: Discover fields, transitions, field options — metadata needed to construct valid jira_write payloads.
+- jira_write: Create, update, delete, transition issues; add/edit comments; move issues to sprints; add/update/delete worklogs (time tracking). Supports batch (array of items). Always has dry_run option.
+- jira_schema: Discover fields, transitions — metadata needed to construct valid jira_write payloads.
 
 Workflow tips:
 1. Use jira_schema to discover available fields and transitions before writing.
 2. Use jira_read with JQL for flexible queries.
 3. All jira_write actions support dry_run=true to preview changes without applying them.
-4. Descriptions and comments accept Markdown — they are auto-converted to Atlassian Document Format.`
+4. Descriptions and comments use plain text or wiki markup (NOT Markdown/ADF — Jira Server 7.x limitation).
+5. Time tracking: use add_worklog action (timetracking field is read-only in Jira Server).`
