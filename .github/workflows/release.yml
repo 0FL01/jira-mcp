@@ -1,30 +1,19 @@
 name: Release
 
 on:
-  push:
-    tags:
-      - "v*"
   workflow_dispatch:
     inputs:
       version:
-        description: 'Release version (e.g., v0.2.0)'
+        description: 'Version (e.g., v0.2.0)'
         required: true
         type: string
-      release_type:
-        description: 'Release type'
-        required: true
-        default: 'release'
-        type: choice
-        options:
-          - release
-          - snapshot
 
 permissions:
   contents: write
 
 jobs:
   release:
-    name: GoReleaser
+    name: Build & Release
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -35,25 +24,15 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - name: Create tag for manual run
-        if: github.event_name == 'workflow_dispatch'
+      - name: Create tag
         run: |
           git tag ${{ inputs.version }}
           git push origin ${{ inputs.version }}
-
-      - name: Determine args
-        id: args
-        run: |
-          if [ "${{ inputs.release_type }}" == "snapshot" ]; then
-            echo "ARGS=release --clean --snapshot" >> $GITHUB_OUTPUT
-          else
-            echo "ARGS=release --clean" >> $GITHUB_OUTPUT
-          fi
 
       - uses: goreleaser/goreleaser-action@v6
         with:
           distribution: goreleaser
           version: "~> v2"
-          args: ${{ steps.args.outputs.ARGS }}
+          args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
