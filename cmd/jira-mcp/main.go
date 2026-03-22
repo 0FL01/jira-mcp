@@ -10,6 +10,7 @@ import (
 	"runtime"
 	"time"
 
+	"github.com/joho/godotenv"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/mmatczuk/jira-mcp/internal/jira"
@@ -24,6 +25,9 @@ var (
 )
 
 func main() {
+	// Load .env file if it exists (silent error if not found)
+	_ = godotenv.Load()
+
 	versionFlag := flag.Bool("version", false, "print version information and exit")
 	flag.Parse()
 
