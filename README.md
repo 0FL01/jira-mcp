@@ -2,6 +2,8 @@
 
 Give your AI agent full Jira access with just 3 tools.
 
+**Supported Jira version: Jira Server 7.5.0 (REST API v2).** This project is tailored specifically to this version; compatibility with other Jira versions is not guaranteed.
+
 Most Jira MCPs dump their entire API surface into the model's context. The agent wastes tokens picking between `jira_get_issue`, `jira_fetch_issue`, `jira_issue_get`... and still gets it wrong.
 
 jira-mcp gives the model exactly what it needs:
@@ -46,7 +48,7 @@ Use acli when a human is at the keyboard or when you need Admin/Rovodev operatio
 
 ## Quick start
 
-**Prerequisites:** Jira Server/Data Center 7.x (REST API v2) with Basic Auth enabled. Jira Cloud is not supported.
+**Prerequisites:** Jira Server **7.5.0** with Basic Auth enabled. Jira Cloud is not supported.
 
 ### 1. Prepare Jira credentials
 
@@ -58,7 +60,7 @@ Use the credentials accepted by your Jira deployment's [Basic authentication](ht
 
 ### 2. Configure OpenCode with `.env`
 
-Download the binary for your platform from the [releases page](https://github.com/mmatczuk/jira-mcp/releases) and install it, for example in `~/.local/bin/jira-mcp`.
+Download the binary from [0FL01/jira-mcp releases](https://github.com/0FL01/jira-mcp/releases) and install it, for example in `~/.local/bin/jira-mcp`. The source repository is [0FL01/jira-mcp](https://github.com/0FL01/jira-mcp).
 
 jira-mcp loads `.env` from its **process working directory**, not from the directory containing the binary. It does not search parent directories or load `.env.local` automatically.
 
@@ -115,55 +117,11 @@ Then ask OpenCode to list Jira projects using `jira_read` with `resource: "proje
 If startup reports a missing variable, check `cwd`, file readability/syntax, and empty ENV overrides. For compatibility, errors loading the automatic `.env` are currently ignored; required empty variables still stop startup. A Jira 401 after connection is not proof that `.env` was skipped: check inherited ENV, the Jira URL, username, and whether the secret is accepted through Basic Auth. Never paste credentials into logs or bug reports.
 
 <details>
-<summary>Claude Code and other MCP clients (Homebrew, Docker, binary)</summary>
+<summary>Claude Code and other MCP clients</summary>
 
 ### Install and add to Claude Code
 
-Pick one path:
-
-**Homebrew**
-
-```bash
-brew tap mmatczuk/jira-mcp https://github.com/mmatczuk/jira-mcp
-brew install jira-mcp
-```
-
-```bash
-claude mcp add-json jira '{
-  "command": "jira-mcp",
-  "env": {
-    "JIRA_URL": "https://jira.example.com",
-    "JIRA_EMAIL": "jira-username",
-    "JIRA_API_TOKEN": "your-basic-auth-secret"
-  }
-}'
-```
-
-**Docker**
-
-No install needed. The `-e VAR` flags (without a value) forward each variable from `env` into the container:
-
-```bash
-claude mcp add-json jira '{
-  "command": "docker",
-  "args": [
-    "run", "-i", "--rm",
-    "-e", "JIRA_URL",
-    "-e", "JIRA_EMAIL",
-    "-e", "JIRA_API_TOKEN",
-    "mmatczuk/jira-mcp"
-  ],
-  "env": {
-    "JIRA_URL": "https://jira.example.com",
-    "JIRA_EMAIL": "jira-username",
-    "JIRA_API_TOKEN": "your-basic-auth-secret"
-  }
-}'
-```
-
-**Binary**
-
-Download the binary for your platform from the [releases page](https://github.com/mmatczuk/jira-mcp/releases) and put it on your `PATH`, then:
+Download the binary from [0FL01/jira-mcp releases](https://github.com/0FL01/jira-mcp/releases) and put it on your `PATH`, then:
 
 ```bash
 claude mcp add-json jira '{
